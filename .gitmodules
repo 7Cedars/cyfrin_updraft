@@ -1,0 +1,3 @@
+[submodule "security_auditing/3-passwordstore-audit/lib/openzeppelin-contracts"]
+	path = security_auditing/3-passwordstore-audit/lib/openzeppelin-contracts
+	url = https://github.com/openZeppelin/openzeppelin-contracts
