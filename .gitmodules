@@ -7,3 +7,6 @@
 [submodule "security_auditing/4-puppy-raffle-audit/lib/openzeppelin-contracts"]
 	path = security_auditing/4-puppy-raffle-audit/lib/openzeppelin-contracts
 	url = https://github.com/openZeppelin/openzeppelin-contracts
+[submodule "security_auditing/4-puppy-raffle-audit/lib/forge-std"]
+	path = security_auditing/4-puppy-raffle-audit/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
