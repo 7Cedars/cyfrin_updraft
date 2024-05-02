@@ -10,3 +10,6 @@
 [submodule "security_auditing/4-puppy-raffle-audit/lib/forge-std"]
 	path = security_auditing/4-puppy-raffle-audit/lib/forge-std
 	url = https://github.com/foundry-rs/forge-std
+[submodule "security_auditing/4-puppy-raffle-audit/lib/base64"]
+	path = security_auditing/4-puppy-raffle-audit/lib/base64
+	url = https://github.com/Brechtpd/base64
