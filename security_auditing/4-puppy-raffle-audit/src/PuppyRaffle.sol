@@ -25,7 +25,7 @@ contract PuppyRaffle is ERC721, Ownable {
     uint256 public raffleStartTime;
     address public previousWinner;
 
-    // We do some storage packing to save gas
+    // We do some storage packing to save gas £check - unsafe?  
     address public feeAddress;
     uint64 public totalFees = 0;
 
@@ -78,11 +78,13 @@ contract PuppyRaffle is ERC721, Ownable {
     /// @param newPlayers the list of players to enter the raffle
     function enterRaffle(address[] memory newPlayers) public payable {
         require(msg.value == entranceFee * newPlayers.length, "PuppyRaffle: Must send enough to enter raffle");
+        
         for (uint256 i = 0; i < newPlayers.length; i++) {
             players.push(newPlayers[i]);
         }
-
         // Check for duplicates
+        // £audit the Check should be BEFORE adding new players to memory. -- this enables duplicates to be entered. 
+        // only thing that will not happen is emitting event. 
         for (uint256 i = 0; i < players.length - 1; i++) {
             for (uint256 j = i + 1; j < players.length; j++) {
                 require(players[i] != players[j], "PuppyRaffle: Duplicate player");
@@ -98,15 +100,17 @@ contract PuppyRaffle is ERC721, Ownable {
         require(playerAddress == msg.sender, "PuppyRaffle: Only the player can refund");
         require(playerAddress != address(0), "PuppyRaffle: Player already refunded, or is not active");
 
+        // £audit: here the sequence is incorrect => reentrancy attack vulnerability. Switch following two sentences? 
         payable(msg.sender).sendValue(entranceFee);
-
         players[playerIndex] = address(0);
+
         emit RaffleRefunded(playerAddress);
     }
 
     /// @notice a way to get the index in the array
     /// @param player the address of a player in the raffle
     /// @return the index of the player in the array, if they are not active, it returns 0
+    //£question: why is this needed? -- super gas inefficient. Is it possible to do without? 
     function getActivePlayerIndex(address player) external view returns (uint256) {
         for (uint256 i = 0; i < players.length; i++) {
             if (players[i] == player) {
@@ -125,6 +129,7 @@ contract PuppyRaffle is ERC721, Ownable {
     function selectWinner() external {
         require(block.timestamp >= raffleStartTime + raffleDuration, "PuppyRaffle: Raffle not over");
         require(players.length >= 4, "PuppyRaffle: Need at least 4 players");
+        // £audit: NOT RANDOM. Classic. -- need oracle. 
         uint256 winnerIndex =
             uint256(keccak256(abi.encodePacked(msg.sender, block.timestamp, block.difficulty))) % players.length;
         address winner = players[winnerIndex];
@@ -145,6 +150,7 @@ contract PuppyRaffle is ERC721, Ownable {
             tokenIdToRarity[tokenId] = LEGENDARY_RARITY;
         }
 
+        // £audit: sequence here also a problem? reentrancy attack? -- the require statement comes way at the end. 
         delete players;
         raffleStartTime = block.timestamp;
         previousWinner = winner;
