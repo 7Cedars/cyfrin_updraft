@@ -18,7 +18,7 @@ import {Base64} from "lib/base64/base64.sol";
 contract PuppyRaffle is ERC721, Ownable {
     using Address for address payable;
 
-    uint256 public immutable entranceFee;
+    uint256 public immutable entranceFee; //£ should 
 
     address[] public players;
     uint256 public raffleDuration;
@@ -85,6 +85,7 @@ contract PuppyRaffle is ERC721, Ownable {
         // Check for duplicates
         // £audit the Check should be BEFORE adding new players to memory. -- this enables duplicates to be entered. 
         // only thing that will not happen is emitting event. 
+        // £ Denial-of-Service Buc - Continue HERE  
         for (uint256 i = 0; i < players.length - 1; i++) {
             for (uint256 j = i + 1; j < players.length; j++) {
                 require(players[i] != players[j], "PuppyRaffle: Duplicate player");
@@ -129,7 +130,7 @@ contract PuppyRaffle is ERC721, Ownable {
     function selectWinner() external {
         require(block.timestamp >= raffleStartTime + raffleDuration, "PuppyRaffle: Raffle not over");
         require(players.length >= 4, "PuppyRaffle: Need at least 4 players");
-        // £audit: NOT RANDOM. Classic. -- need oracle. 
+        // £audit: NOT RANDOM. Classic. -- needs oracle. 
         uint256 winnerIndex =
             uint256(keccak256(abi.encodePacked(msg.sender, block.timestamp, block.difficulty))) % players.length;
         address winner = players[winnerIndex];
@@ -192,6 +193,8 @@ contract PuppyRaffle is ERC721, Ownable {
 
     /// @notice this function will return the URI for the token
     /// @param tokenId the Id of the NFT
+    // ... £ok, this is a evry strange way of doing this. Why not have Uri to metadata? 
+    // £audit: gas issue? 
     function tokenURI(uint256 tokenId) public view virtual override returns (string memory) {
         require(_exists(tokenId), "PuppyRaffle: URI query for nonexistent token");
 
