@@ -13,3 +13,12 @@
 [submodule "security_auditing/4-puppy-raffle-audit/lib/base64"]
 	path = security_auditing/4-puppy-raffle-audit/lib/base64
 	url = https://github.com/Brechtpd/base64
+[submodule "security_auditing/sc-exploits-minimized/lib/forge-std"]
+	path = security_auditing/sc-exploits-minimized/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "security_auditing/sc-exploits-minimized/lib/openzeppelin-contracts"]
+	path = security_auditing/sc-exploits-minimized/lib/openzeppelin-contracts
+	url = https://github.com/openzeppelin/openzeppelin-contracts
+[submodule "security_auditing/sc-exploits-minimized/lib/kontrol-cheatcodes"]
+	path = security_auditing/sc-exploits-minimized/lib/kontrol-cheatcodes
+	url = https://github.com/runtimeverification/kontrol-cheatcodes

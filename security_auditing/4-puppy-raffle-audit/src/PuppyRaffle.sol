@@ -18,7 +18,7 @@ import {Base64} from "lib/base64/base64.sol";
 contract PuppyRaffle is ERC721, Ownable {
     using Address for address payable;
 
-    uint256 public immutable entranceFee; //£ should 
+    uint256 public immutable entranceFee; //£ should be named something like i_entranceFee
 
     address[] public players;
     uint256 public raffleDuration;
@@ -85,7 +85,7 @@ contract PuppyRaffle is ERC721, Ownable {
         // Check for duplicates
         // £audit the Check should be BEFORE adding new players to memory. -- this enables duplicates to be entered. 
         // only thing that will not happen is emitting event. 
-        // £ Denial-of-Service Buc - Continue HERE  
+        // £audit: Denial-of-Service bug - Continue HERE  
         for (uint256 i = 0; i < players.length - 1; i++) {
             for (uint256 j = i + 1; j < players.length; j++) {
                 require(players[i] != players[j], "PuppyRaffle: Duplicate player");
@@ -99,9 +99,10 @@ contract PuppyRaffle is ERC721, Ownable {
     function refund(uint256 playerIndex) public {
         address playerAddress = players[playerIndex];
         require(playerAddress == msg.sender, "PuppyRaffle: Only the player can refund");
+        //£audit: player 0 can never refund... 
         require(playerAddress != address(0), "PuppyRaffle: Player already refunded, or is not active");
 
-        // £audit: here the sequence is incorrect => reentrancy attack vulnerability. Switch following two sentences? 
+        // £audit: here the sequence is incorrect (not CEI)=> reentrancy attack vulnerability. Switch following two sentences? 
         payable(msg.sender).sendValue(entranceFee);
         players[playerIndex] = address(0);
 
@@ -118,6 +119,7 @@ contract PuppyRaffle is ERC721, Ownable {
                 return i;
             }
         }
+        //£question: £audit if the player is at index 0... they might think they are inactive.  
         return 0;
     }
 
