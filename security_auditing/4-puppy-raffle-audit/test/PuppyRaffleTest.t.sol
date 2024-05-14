@@ -280,7 +280,41 @@ contract PuppyRaffleTest is Test {
 
     }
 
+    function test_overflowTotalFee() public {
+        address[] memory players = new address[](4);
+        players[0] = playerOne;
+        players[1] = playerTwo;
+        players[2] = playerThree;
+        players[3] = playerFour;
+        uint256 totalFeesSingleRun; 
+        uint64 mockTotalFees; 
 
+        puppyRaffle.enterRaffle{value: entranceFee * 4}(players);
+        vm.warp(block.timestamp + duration + 1);
+        vm.roll(block.number + 1);
+        
+        puppyRaffle.selectWinner(); 
+        puppyRaffle.withdrawFees(); 
+        
+        totalFeesSingleRun = address(99).balance;
+        console.log("fee return from a single run of 4 players: ", totalFeesSingleRun); 
+
+        for (uint256 i; i < 25; i++) {
+            puppyRaffle.enterRaffle{value: entranceFee * 4}(players);
+            vm.warp(block.timestamp + duration + 1);
+            vm.roll(block.number + 1);
+            puppyRaffle.selectWinner(); 
+
+            mockTotalFees = mockTotalFees + uint64(totalFeesSingleRun); 
+        }
+        
+        console.log("balance at puppyRaffle: ", address(puppyRaffle).balance); 
+        console.log("balance of mockTotalFees", mockTotalFees); 
+
+        assert(mockTotalFees != address(puppyRaffle).balance); 
+
+        // Add show that withdraw fees will fail? 
+    }
 }
 
 contract ReentrancyAttacker {

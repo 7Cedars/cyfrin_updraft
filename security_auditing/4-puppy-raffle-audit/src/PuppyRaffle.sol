@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.7.6;
+// £report-written use floating pragma is discouraged. Exact version better. -- 
+// £report-written: why use old version of solidity? 
 
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {Base64} from "lib/base64/base64.sol";
+
+//£audit Many functions lack emit events. 
 
 /// @title PuppyRaffle
 /// @author PuppyLoveDAO
@@ -21,6 +25,7 @@ contract PuppyRaffle is ERC721, Ownable {
     uint256 public immutable entranceFee; //£ should be named something like i_entranceFee
 
     address[] public players;
+    // following should be immutable - as it does not change throughout contract. 
     uint256 public raffleDuration;
     uint256 public raffleStartTime;
     address public previousWinner;
@@ -40,6 +45,7 @@ contract PuppyRaffle is ERC721, Ownable {
     string private constant COMMON = "common";
 
     // Stats for the rare puppy (st. bernard)
+    // £report-written: uri's should be saved as constants
     string private rareImageUri = "ipfs://QmUPjADFGEKmfohdTaNcWhp7VGk26h5jXDA7v3VtTnTLcW";
     uint256 public constant RARE_RARITY = 25;
     string private constant RARE = "rare";
@@ -59,6 +65,8 @@ contract PuppyRaffle is ERC721, Ownable {
     /// @param _raffleDuration the duration in seconds of the raffle
     constructor(uint256 _entranceFee, address _feeAddress, uint256 _raffleDuration) ERC721("Puppy Raffle", "PR") {
         entranceFee = _entranceFee;
+        //£report-written check for zero address in next line (slither).  
+        // (= input validation)
         feeAddress = _feeAddress;
         raffleDuration = _raffleDuration;
         raffleStartTime = block.timestamp;
@@ -85,7 +93,8 @@ contract PuppyRaffle is ERC721, Ownable {
         // Check for duplicates
         // £audit the Check should be BEFORE adding new players to memory. -- this enables duplicates to be entered. 
         // only thing that will not happen is emitting event. 
-        // £audit: Denial-of-Service bug - Continue HERE  
+        // £audit: Denial-of-Service bug 
+        // £report-written: cache lenght of array, otherwise it will constantly call storage, whcih is really gas intensive.    
         for (uint256 i = 0; i < players.length - 1; i++) {
             for (uint256 j = i + 1; j < players.length; j++) {
                 require(players[i] != players[j], "PuppyRaffle: Duplicate player");
@@ -99,27 +108,29 @@ contract PuppyRaffle is ERC721, Ownable {
     function refund(uint256 playerIndex) public {
         address playerAddress = players[playerIndex];
         require(playerAddress == msg.sender, "PuppyRaffle: Only the player can refund");
-        //£audit: player 0 can never refund... 
+        //£audit: player 0 can never refund!! (I think this is the massive bug that is mentioned in the video...)
         require(playerAddress != address(0), "PuppyRaffle: Player already refunded, or is not active");
 
-        // £audit: here the sequence is incorrect (not CEI)=> reentrancy attack vulnerability. Switch following two sentences? 
+        // £written: here the sequence is incorrect (not CEI)=> reentrancy attack vulnerability. Switch following two sentences? 
         payable(msg.sender).sendValue(entranceFee);
         players[playerIndex] = address(0);
 
+        // £question: so this emit can be influeced - through reentrency attack above? 
+        // £written: low.  
         emit RaffleRefunded(playerAddress);
     }
 
     /// @notice a way to get the index in the array
     /// @param player the address of a player in the raffle
     /// @return the index of the player in the array, if they are not active, it returns 0
-    //£question: why is this needed? -- super gas inefficient. Is it possible to do without? 
+    // £audit: gas issue: use of array and then loop is inefficient. Same functionality is possible with mapping. Use that 
     function getActivePlayerIndex(address player) external view returns (uint256) {
         for (uint256 i = 0; i < players.length; i++) {
             if (players[i] == player) {
                 return i;
             }
         }
-        //£question: £audit if the player is at index 0... they might think they are inactive.  
+        // £audit if the player is at index 0... they will think thet are inactive.  
         return 0;
     }
 
@@ -129,21 +140,32 @@ contract PuppyRaffle is ERC721, Ownable {
     /// @dev we use a hash of on-chain data to generate the random numbers
     /// @dev we reset the active players array after the winner is selected
     /// @dev we send 80% of the funds to the winner, the other 20% goes to the feeAddress
+    // £audit! this fucntion can be called by anyone. -- it is possible to have it revert if you don't like the outcome!  
+    // 
     function selectWinner() external {
         require(block.timestamp >= raffleStartTime + raffleDuration, "PuppyRaffle: Raffle not over");
+        // £audit: the docs do NOT mention that it has a minimum amount of 4 players. Documentation issue.  
         require(players.length >= 4, "PuppyRaffle: Need at least 4 players");
-        // £audit: NOT RANDOM. Classic. -- needs oracle. 
+        // £audit: NOT RANDOM. Classic. -- needs oracle. Chainlink VRF 
         uint256 winnerIndex =
             uint256(keccak256(abi.encodePacked(msg.sender, block.timestamp, block.difficulty))) % players.length;
         address winner = players[winnerIndex];
+        // £q Why not just balance? -- leave this as question for now. but likely an £audit issue - see issues below.  
         uint256 totalAmountCollected = players.length * entranceFee;
-        uint256 prizePool = (totalAmountCollected * 80) / 100;
+        // £audit! precision loss is an issue here! Actually... 
+        // £audit-info avoid magic numbers: include public constants with clear descriptors. 
+        uint256 prizePool = (totalAmountCollected * 80) / 100; // £ correct? prizepool 
+        // £question: can this line potetnially break withdraw function? check and build PoC!    
         uint256 fee = (totalAmountCollected * 20) / 100;
+        // The total fees that can be collected by owner. £audit: overflow bug. 
+        // additional £audit: this is an unsafe casting of uint256 to uint64! 
         totalFees = totalFees + uint64(fee);
 
+        // often used with ERC-721 tokens. -- £question for self: does not exist in ERC-1155... right? 
         uint256 tokenId = totalSupply();
 
         // We use a different RNG calculate from the winnerIndex to determine rarity
+        // £audit randomness is also problem here. 
         uint256 rarity = uint256(keccak256(abi.encodePacked(msg.sender, block.difficulty))) % 100;
         if (rarity <= COMMON_RARITY) {
             tokenIdToRarity[tokenId] = COMMON_RARITY;
@@ -152,21 +174,31 @@ contract PuppyRaffle is ERC721, Ownable {
         } else {
             tokenIdToRarity[tokenId] = LEGENDARY_RARITY;
         }
-
-        // £audit: sequence here also a problem? reentrancy attack? -- the require statement comes way at the end. 
+        
         delete players;
         raffleStartTime = block.timestamp;
         previousWinner = winner;
+        
+        // £audit: CEI sequence here also a problem? reentrancy attack? -- the require statement comes way at the end. 
+        // £audit can you create an external contract that reverts if you do not like winner? YES :D 
         (bool success,) = winner.call{value: prizePool}("");
         require(success, "PuppyRaffle: Failed to send prize pool to winner");
         _safeMint(winner, tokenId);
     }
 
     /// @notice this function will withdraw the fees to the feeAddress
+    // £audit: this function can be called by anyone. problem? or just annoying? 
     function withdrawFees() external {
+        // £audit NB! this will hang BECAUSE of overflow bug! - require function does not check what it should be checking... 
+        // £question: the impricision issue will also crash this? 
+        // £audit: mishandling eth: with a self destruct function in external function, you can force eth into another contract. 
+        // See SelfDestructMe in SC-Exploits-Minimized
+        // if breaks this require, resulting in a DoS :no-one will be able to withdraw fees. 
         require(address(this).balance == uint256(totalFees), "PuppyRaffle: There are currently players active!");
         uint256 feesToWithdraw = totalFees;
         totalFees = 0;
+        // £what if feeAddress is contract with poor fallback? 
+        // slither-disable-next-line arbitrary-send-eth
         (bool success,) = feeAddress.call{value: feesToWithdraw}("");
         require(success, "PuppyRaffle: Failed to withdraw fees");
     }
@@ -179,6 +211,8 @@ contract PuppyRaffle is ERC721, Ownable {
     }
 
     /// @notice this function will return true if the msg.sender is an active player
+    // £audit: this function is not used anywhere! 
+    // - severity = none; but informational. 
     function _isActivePlayer() internal view returns (bool) {
         for (uint256 i = 0; i < players.length; i++) {
             if (players[i] == msg.sender) {
@@ -195,7 +229,7 @@ contract PuppyRaffle is ERC721, Ownable {
 
     /// @notice this function will return the URI for the token
     /// @param tokenId the Id of the NFT
-    // ... £ok, this is a evry strange way of doing this. Why not have Uri to metadata? 
+    // ... £ok, this is a evry strange way of doing this. -- it's because they are dynamic. 
     // £audit: gas issue? 
     function tokenURI(uint256 tokenId) public view virtual override returns (string memory) {
         require(_exists(tokenId), "PuppyRaffle: URI query for nonexistent token");
@@ -208,7 +242,7 @@ contract PuppyRaffle is ERC721, Ownable {
             abi.encodePacked(
                 _baseURI(),
                 Base64.encode(
-                    bytes(
+                    bytes( // £question: is this redundant? 
                         abi.encodePacked(
                             '{"name":"',
                             name(),
