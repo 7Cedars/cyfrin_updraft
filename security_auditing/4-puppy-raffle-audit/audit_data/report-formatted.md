@@ -1,3 +1,104 @@
+---
+title: Protocol Audit Report
+author: Seven Cedars
+date: May 14, 2024
+header-includes:
+  - \usepackage{titling}
+  - \usepackage{graphicx}
+---
+
+\begin{titlepage}
+    \centering
+    \begin{figure}[h]
+        \centering
+        \includegraphics[width=0.5\textwidth]{logo.pdf} 
+    \end{figure}
+    \vspace*{2cm}
+    {\Huge\bfseries Puppy Raffle Audit Report\par}
+    \vspace{1cm}
+    {\Large Version 1.0\par}
+    \vspace{2cm}
+    {\Large\itshape Cyfrin.io\par}
+    \vfill
+    {\large \today\par}
+\end{titlepage}
+
+\maketitle
+
+<!-- Your report starts here! -->
+
+Prepared by: [Seven Cedars](https://github.com/7Cedars)
+Lead Auditors: Seven Cedars
+
+# Table of Contents
+- [Table of Contents](#table-of-contents)
+- [Protocol Summary](#protocol-summary)
+- [Disclaimer](#disclaimer)
+- [Risk Classification](#risk-classification)
+- [Audit Details](#audit-details)
+  - [Scope](#scope)
+  - [Roles](#roles)
+- [Executive Summary](#executive-summary)
+  - [Issues found](#issues-found)
+- [Findings](#findings)
+
+# Protocol Summary
+
+The protocol is a simple raffle contract that allows for a minimum of four players to enter a raffle. They have to pay a preset entrees fee to do so. After a set time frame a winner can be picked. The winner receives an NFT and a percentage of entree fees. A percentage of the entree fees are set aside (in this case twenty percent) for the owner to transfer to an address of their choice.
+
+The description from the documentation: 
+This project is to enter a raffle to win a cute dog NFT. The protocol should do the following:
+
+1. Call the `enterRaffle` function with the following parameters:
+   1. `address[] participants`: A list of addresses that enter. You can use this to enter yourself multiple times, or yourself and a group of your friends.
+2. Duplicate addresses are not allowed
+3. Users are allowed to get a refund of their ticket & `value` if they call the `refund` function
+4. Every X seconds, the raffle will be able to draw a winner and be minted a random puppy
+5. The owner of the protocol will set a feeAddress to take a cut of the `value`, and the rest of the funds will be sent to the winner of the puppy.
+
+# Disclaimer
+
+The Seven Cedars team makes all effort to find as many vulnerabilities in the code in the given time period, but holds no responsibilities for the findings provided in this document. A security audit by the team is not an endorsement of the underlying business or product. The audit was time-boxed and the review of the code was solely on the security aspects of the Solidity implementation of the contracts.
+
+# Risk Classification
+
+|            |        | Impact |        |     |
+| ---------- | ------ | ------ | ------ | --- |
+|            |        | High   | Medium | Low |
+|            | High   | H      | H/M    | M   |
+| Likelihood | Medium | H/M    | M      | M/L |
+|            | Low    | M      | M/L    | L   |
+
+We use the [CodeHawks](https://docs.codehawks.com/hawks-auditors/how-to-evaluate-a-finding-severity) severity matrix to determine severity. See the documentation for more details.
+
+# Audit Details 
+
+## Scope 
+```javascript
+./src/
+#-- PuppyRaffle.sol
+```
+
+## Roles
+- Owner: Deployer of the protocol, has the power to change the wallet address to which fees are sent through the `changeFeeAddress` function.
+- Player: Participant of the raffle, has the power to enter the raffle with the `enterRaffle` function and refund value through `refund` function.
+
+# Executive Summary
+
+| Severity | Number of Issues found |
+| -------- | ---------------------- |
+| high     | 3                      |
+| medium   | 4                      |
+| low      | 2                      |
+| gas      | 2                      |
+| info     | 9                      |
+| total    | 20                     |
+
+
+## Issues found
+# Findings
+
+## High
 
 ### [H-1] Reentrancy attack vulnerability in the `PuppyRaffle::refund` function, allows for draining of all funds from contract.  
 
@@ -223,6 +324,8 @@ Place the dollowing in `PuppyRaffleTest.t.sol`:
 
 There are more attack vectors related to this sentence. We recommend to remove it completely.  
 
+## Medium
+
 ### [M-1] An unbound loop at `PuppyRaffle::enterRaffle` creates a possibility for a denial-of-service(DoS) attack, incrementing gas cost for future entrees. 
 
 **Description:** The `PuppyRaffle::enterRaffle` loops through an array of players `players` to check for duplicates. The array `players` is unbound. As the length of `players` increases, the cost to enter the raffle for new players increases as a longer array needs to be checked for duplicates. As a result, early entrants pay little in gas fees, later entrants (much) more. 
@@ -289,22 +392,7 @@ Place the following code in `PuppyRaffleTest.t.sol`.
 1. Consider allowing multiple addresses. 
 2. Create a mapping. This would allow constant time look up if players has entered.
 
-
-### [M-2] The `PuppyRaffle::refund` does not allow player 0 to get refund.  
-£TODO 
-Or low severity? It does make the function unusuable for player 0...  
-
-**Description:** 
-
-
-**Impact:** 
-
-**Proof of Concept:**
-
-**Recommended Mitigation:** 
-
-
-### [M-3] unsafe cast of uint256 to uint64 at `PuppyRaffle::selectWinner`.  
+### [M-2] unsafe cast of uint256 to uint64 at `PuppyRaffle::selectWinner`.  
 
 **Description:** 
 The `fee` variable is `uint256` while totalFees is `uint64`. This will cause `uint64(fee)`, if its value is higher than `type(uint64).max`, to give an incorrect value. 
@@ -364,7 +452,7 @@ Place the dollowing in `PuppyRaffleTest.t.sol`:
 2. You could also use `safeMath` library from OpenZeppelin for versions below `0.8.0`. 
 3. Remove the balance check from `PuppyRaffle::withdrawFees`.
    
-### [M-4] Smart Contract wallets raffle winners without a `receive` or `fallback` function will block start of new raffle. 
+### [M-3] Smart Contract wallets raffle winners without a `receive` or `fallback` function will block start of new raffle. 
 
 **Description:** The `PuppyRaffle::selectWinner` function resets the lottery. However, if the winner is a smart contract without a `receive` or `fallback` function (and hence rejects payment) the lottery will not be able to reset. 
 
@@ -385,7 +473,7 @@ Also, the winnings would not be paid out to the incorrect smart contract, with s
 
 Generally, it is best practice to have users _pull_ funds from a contract, instead of _pushing_ funds to users. 
 
-### [M-5] Player with index 0 cannot call the `PuppyRaffle::refund` function, hence will not be able to get a refund.  
+### [M-4] Player with index 0 cannot call the `PuppyRaffle::refund` function, hence will not be able to get a refund.  
 
 **Description:** The `PuppyRaffle::refund` function contains a check that the player does not have index 0 (as this is used for non-existent players, see bug above). This means that if the player at index (0) attempts to get a refund, the `PuppyRaffle::refund`  function will revert. 
 
@@ -403,6 +491,7 @@ Generally, it is best practice to have users _pull_ funds from a contract, inste
 **Recommended Mitigation:** 
 `PuppyRaffle::getActivePlayerIndex` should return a `int256` (instead of `uint256`); and have a -1 return if the player has not entered the raffle. `PuppyRaffle::refund` can use getActivePlayerIndex to check if player address returns -1. 
 
+## Low
 
 ### [L-1] `PuppyRaffle::getPlayerIndex` returns 0 for non-existent players, and for player 0. It might mean that player 0 might incorrectly think they have not entered the raffle. 
 
@@ -449,7 +538,7 @@ Avoid `require` / `revert` statements in a loop because a single bad item can ca
         }
 	```
 
-# Gas 
+## Gas 
 
 ### [G-1] Unchanged state variables should be declared immutable. 
 
@@ -478,7 +567,7 @@ Reading from storage is gas expensive. Everytime you call players.length you rea
 
 ```
 
-# Informational 
+## Informational 
 
 ### [I-1] Solidity pragma should be specific, not wide.
 
