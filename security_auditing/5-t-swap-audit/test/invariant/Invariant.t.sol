@@ -6,7 +6,7 @@ import { StdInvariant } from "forge-std/StdInvariant.sol";
 import { ERC20Mock } from "../mocks/ERC20Mock.sol";
 import { PoolFactory } from "../../src/PoolFactory.sol";
 import { TSwapPool } from "../../src/TSwapPool.sol";
-import { Handler } from "./Handler.t.sol"; 
+import { Handler } from "./Handler.t.sol";
 
 contract Invariant is StdInvariant, Test {
     ERC20Mock poolToken;
@@ -15,7 +15,7 @@ contract Invariant is StdInvariant, Test {
     // setting up the contracts.
     PoolFactory factory;
     TSwapPool pool;
-    Handler handler; 
+    Handler handler;
 
     int256 constant STARTING_X = 100e18; // starting ERC20 pooltoken.
     int256 constant STARTING_Y = 100e18; // starting weth.
@@ -35,22 +35,22 @@ contract Invariant is StdInvariant, Test {
 
         pool.deposit(uint256(STARTING_Y), uint256(STARTING_Y), uint256(STARTING_X), uint64(block.timestamp));
 
-        handler = new Handler(pool); 
+        handler = new Handler(pool);
 
-        bytes4[] memory selectors = new bytes4[](2); 
+        bytes4[] memory selectors = new bytes4[](2);
         selectors[0] = Handler.deposit.selector;
-        selectors[1] = Handler.swapPoolTokenForWethBasedOnOutputWeth.selector; 
+        selectors[1] = Handler.swapPoolTokenForWethBasedOnOutputWeth.selector;
 
-        targetSelector(FuzzSelector({addr:address(handler), selectors: selectors}));
-        targetContract(address(handler)); 
+        targetSelector(FuzzSelector({ addr: address(handler), selectors: selectors }));
+        targetContract(address(handler));
     }
 
     function statefulFuzz_constantProductFormulaStaysTheSameX() public {
-        assertEq(handler.actualDeltaX(), handler.expectedDeltaX()); 
+        assertEq(handler.actualDeltaX(), handler.expectedDeltaX());
     }
 
-    // this actually does not break with me. 
+    // this actually does not break with me.
     function statefulFuzz_constantProductFormulaStaysTheSameY() public {
-        assertEq(handler.actualDeltaY(), handler.expectedDeltaY()); 
+        assertEq(handler.actualDeltaY(), handler.expectedDeltaY());
     }
 }

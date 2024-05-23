@@ -67,32 +67,24 @@ contract Handler is Test {
 
         // ∆x = (β/(1-β)) * x
         uint256 poolTokenAmount = pool.getInputAmountBasedOnOutput(
-            outputWeth, 
-            poolToken.balanceOf((address(pool))), 
-            weth.balanceOf((address(pool)))
+            outputWeth, poolToken.balanceOf((address(pool))), weth.balanceOf((address(pool)))
         );
         if (poolTokenAmount >= type(uint64).max) {
-          return; 
+            return;
         }
 
         startingY = int256(weth.balanceOf(address(pool)));
         startingX = int256(poolToken.balanceOf(address(pool)));
         expectedDeltaY = int256(-1) * int256(outputWeth);
         expectedDeltaX = int256(poolTokenAmount);
-        if(poolToken.balanceOf(swapper) < poolTokenAmount) {
-          poolToken.mint(
-            swapper, 
-            poolTokenAmount - poolToken.balanceOf(swapper) + 1
-          );
+        if (poolToken.balanceOf(swapper) < poolTokenAmount) {
+            poolToken.mint(swapper, poolTokenAmount - poolToken.balanceOf(swapper) + 1);
         }
 
         vm.startPrank(swapper);
         poolToken.approve(address(pool), type(uint256).max);
-        pool.swapExactOutput(
-          poolToken, weth, outputWeth, uint64(block.timestamp)
-        );
+        pool.swapExactOutput(poolToken, weth, outputWeth, uint64(block.timestamp));
         vm.stopPrank();
-
 
         uint256 endingY = weth.balanceOf(address(pool));
         uint256 endingX = poolToken.balanceOf(address(pool));

@@ -41,7 +41,7 @@ contract TSwapPool is ERC20 {
     /*//////////////////////////////////////////////////////////////
                                  EVENTS
     //////////////////////////////////////////////////////////////*/
-    // £audit-info: 3 events should be indexed if there are more than 3 parameters. 
+    // £report-written: 3 events should be indexed if there are more than 3 parameters.
     event LiquidityAdded(address indexed liquidityProvider, uint256 wethDeposited, uint256 poolTokensDeposited);
     event LiquidityRemoved(address indexed liquidityProvider, uint256 wethWithdrawn, uint256 poolTokensWithdrawn);
     event Swap(address indexed swapper, IERC20 tokenIn, uint256 amountTokenIn, IERC20 tokenOut, uint256 amountTokenOut);
@@ -94,15 +94,15 @@ contract TSwapPool is ERC20 {
     /// @param deadline The deadline for the transaction to be completed by
 
     // £question: with no tokens deposited, how does it calculate ratio?
-    // £checked- done. 
+    // £checked- done.
     function deposit(
         uint256 wethToDeposit,
         uint256 minimumLiquidityTokensToMint,
         uint256 maximumPoolTokensToDeposit,
-        // £audit: deadline can be set, but is not used. 
-        // means that user can keep on depositing, even though deadline passed.  
-        // IMPACT: user who expects that deposit will fail, will go through. Sever disruption of protocol. 
-        // likelihood: hight: is always ignored.  
+        // £report-written: deadline can be set, but is not used.
+        // means that user can keep on depositing, even though deadline passed.
+        // IMPACT: user who expects that deposit will fail, will go through. Severe disruption of protocol.
+        // likelihood: high: is always ignored.
         uint64 deadline
     )
         external
@@ -110,12 +110,12 @@ contract TSwapPool is ERC20 {
         returns (uint256 liquidityTokensToMint)
     {
         if (wethToDeposit < MINIMUM_WETH_LIQUIDITY) {
-            // £audit-info placing constant in revert message is a waste of gas: value is always the same. 
+            // £report-written placing constant in revert message is a waste of gas: value is always the same.
             revert TSwapPool__WethDepositAmountTooLow(MINIMUM_WETH_LIQUIDITY, wethToDeposit);
         }
         if (totalLiquidityTokenSupply() > 0) {
             uint256 wethReserves = i_wethToken.balanceOf(address(this));
-            //£audit-info: this line can be removed. unused parameter. 
+            //£report-written: this line can be removed. unused parameter.
             uint256 poolTokenReserves = i_poolToken.balanceOf(address(this));
             // Our invariant says weth, poolTokens, and liquidity tokens must always have the same ratio after the
             // initial deposit
@@ -152,12 +152,14 @@ contract TSwapPool is ERC20 {
             // We just have them send the tokens in, and we mint liquidity tokens based on the weth
             _addLiquidityMintAndTransfer(wethToDeposit, maximumPoolTokensToDeposit, wethToDeposit);
 
-            // £q: we first have external call, and then a variable gets updated. 
-            // not a problem because it is not a state variable? 
-            // £audit-info: better to set before call to _addLiquidityMintAndTransfer (which has an external call) to follow CEI.  
+            // £q: we first have external call, and then a variable gets updated.
+            // not a problem because it is not a state variable?
+            // £report-written: better to set before call to _addLiquidityMintAndTransfer (which has an external call) to
+            // follow CEI.
             liquidityTokensToMint = wethToDeposit;
 
-            // q: so you do not need explicit return statement? Just saying that it returns liquidityTokensToMint is sufficient? interesting... 
+            // q: so you do not need explicit return statement? Just saying that it returns liquidityTokensToMint is
+            // sufficient? interesting...
         }
     }
 
@@ -173,7 +175,7 @@ contract TSwapPool is ERC20 {
         private
     {
         _mint(msg.sender, liquidityTokensToMint);
-        // audit-low: values are inverted! this should be (msg.sender, wethToDeposit, poolTokensToDeposit)  
+        // audit-low: values are inverted! this should be (msg.sender, wethToDeposit, poolTokensToDeposit)
         emit LiquidityAdded(msg.sender, poolTokensToDeposit, wethToDeposit);
 
         // Interactions
@@ -212,7 +214,7 @@ contract TSwapPool is ERC20 {
         }
 
         _burn(msg.sender, liquidityTokensToBurn);
-        // £notice: also emit before external call. Check if I also always do this... 
+        // £notice: also emit before external call. Check if I also always do this...
         emit LiquidityRemoved(msg.sender, wethToWithdraw, poolTokensToWithdraw);
 
         i_wethToken.safeTransfer(msg.sender, wethToWithdraw);
@@ -248,7 +250,7 @@ contract TSwapPool is ERC20 {
         // totalPoolTokensOfPool) + (wethToDeposit * poolTokensToDeposit) = k
         // (totalWethOfPool * totalPoolTokensOfPool) + (wethToDeposit * totalPoolTokensOfPool) = k - (totalWethOfPool *
         // poolTokensToDeposit) - (wethToDeposit * poolTokensToDeposit)
-        // £audit-info: use of literals "magic numbers" should be defined as constant. 
+        // £report-written: use of literals "magic numbers" should be defined as constant.
         uint256 inputAmountMinusFee = inputAmount * 997;
         uint256 numerator = inputAmountMinusFee * outputReserves;
         uint256 denominator = (inputReserves * 1000) + inputAmountMinusFee;
@@ -265,14 +267,14 @@ contract TSwapPool is ERC20 {
         revertIfZero(outputAmount)
         revertIfZero(outputReserves)
         returns (uint256 inputAmount)
-    {// £audit-info: use of literals "magic numbers" should be defined as constant. 
-        
-        // NB! the number is wrong. not 1_000, but 10_000. 
-        // £audit-high: it means the fee is way to high. - users are charged way too much. 
-        return ((inputReserves * outputAmount) * 10_000) / ((outputReserves - outputAmount) * 997);
+    {
+        // £report-written: use of literals "magic numbers" should be defined as constant.
+        // NB! the number is wrong. not 1_000, but 10_000.
+        // £report-written: it means the fee is way to high. - users are charged way too much.
+        return ((inputReserves * outputAmount) * 1_000) / ((outputReserves - outputAmount) * 997);
     }
 
-    // £audit: where is the nat-spec?! 
+    // £report written: where is the nat-spec?! 
 
     function swapExactInput(
         IERC20 inputToken,
@@ -281,12 +283,14 @@ contract TSwapPool is ERC20 {
         uint256 minOutputAmount,
         uint64 deadline
     )
-    // £audit-info: not used internally, so should be marked external. 
+        // £report-written: not used internally, so should be marked external.
         public
         revertIfZero(inputAmount)
         revertIfDeadlinePassed(deadline)
-        //£audit-low. As long as this output is not used anywhere, not a big deal.  
-        returns (uint256 output)
+        returns (
+            //£report-written. low. 
+            uint256 output
+        )
     {
         uint256 inputReserves = inputToken.balanceOf(address(this));
         uint256 outputReserves = outputToken.balanceOf(address(this));
@@ -310,14 +314,14 @@ contract TSwapPool is ERC20 {
      * @param inputToken ERC20 token to pull from caller
      * @param outputToken ERC20 token to send to caller
      * @param outputAmount The exact amount of tokens to send to caller
-     * £audit-info: deadline missing here in natspec. 
+     * £report-skipped: deadline missing here in natspec. 
      */
-    // Why no exact maxInput? 
+    // Why no exact maxInput?
     function swapExactOutput(
         IERC20 inputToken,
         IERC20 outputToken,
         uint256 outputAmount,
-        // uint256 maxInputAmount, 
+        // uint256 maxInputAmount,
         uint64 deadline
     )
         public
@@ -330,9 +334,9 @@ contract TSwapPool is ERC20 {
 
         inputAmount = getInputAmountBasedOnOutput(outputAmount, inputReserves, outputReserves);
 
-        // £audit-medium / high?: no slippage protection. 
+        // £report-written?: no slippage protection.
         // IMPACT: it fails to give expected exchange rate - fundamental to protocol
-        // Likelihood: these days: pretty much a given... 
+        // Likelihood: these days: pretty much a given...
 
         _swap(inputToken, inputAmount, outputToken, outputAmount);
     }
@@ -344,7 +348,7 @@ contract TSwapPool is ERC20 {
      */
     //
     function sellPoolTokens(uint256 poolTokenAmount) external returns (uint256 wethAmount) {
-        // £audit this logic is backwards. Want to swap exact input - not output! 
+        // £written this logic is backwards. Want to swap exact input - not output!
         return swapExactOutput(i_poolToken, i_wethToken, poolTokenAmount, uint64(block.timestamp));
     }
 
@@ -362,7 +366,7 @@ contract TSwapPool is ERC20 {
         }
 
         swap_count++;
-        // @audit-high: breaks invariant. fee-on-transfer 
+        // £written-report: breaks invariant. fee-on-transfer
         if (swap_count >= SWAP_COUNT_MAX) {
             swap_count = 0;
             outputToken.safeTransfer(msg.sender, 1_000_000_000_000_000_000);
@@ -390,7 +394,7 @@ contract TSwapPool is ERC20 {
     }
 
     /// @notice a more verbose way of getting the total supply of liquidity tokens
-    // £audit-info: this should be external. 
+    // £report-written: this should be external.
     function totalLiquidityTokenSupply() public view returns (uint256) {
         return totalSupply();
     }
@@ -409,15 +413,19 @@ contract TSwapPool is ERC20 {
 
     function getPriceOfOneWethInPoolTokens() external view returns (uint256) {
         return getOutputAmountBasedOnInput(
-            // £audit-info: use of literals "magic numbers" should be defined as constant. 
-            1e18, i_wethToken.balanceOf(address(this)), i_poolToken.balanceOf(address(this))
+            // £report-written: use of literals "magic numbers" should be defined as constant.
+            1e18,
+            i_wethToken.balanceOf(address(this)),
+            i_poolToken.balanceOf(address(this))
         );
     }
 
     function getPriceOfOnePoolTokenInWeth() external view returns (uint256) {
         return getOutputAmountBasedOnInput(
-            // £audit-info: use of literals "magic numbers" should be defined as constant. 
-            1e18, i_poolToken.balanceOf(address(this)), i_wethToken.balanceOf(address(this))
+            // £report-written: use of literals "magic numbers" should be defined as constant.
+            1e18,
+            i_poolToken.balanceOf(address(this)),
+            i_wethToken.balanceOf(address(this))
         );
     }
 }
