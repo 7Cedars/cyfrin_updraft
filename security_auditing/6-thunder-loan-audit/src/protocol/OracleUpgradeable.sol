@@ -13,6 +13,7 @@ contract OracleUpgradeable is Initializable {
     }
 
     function __Oracle_init_unchained(address poolFactoryAddress) internal onlyInitializing {
+        // $audit info: need 0 checks 
         s_poolFactory = poolFactoryAddress;
     }
 
