@@ -91,10 +91,10 @@ contract ThunderLoan is Initializable, OwnableUpgradeable, UUPSUpgradeable, Orac
     /*//////////////////////////////////////////////////////////////
                             STATE VARIABLES
     //////////////////////////////////////////////////////////////*/
-    mapping(IERC20 => AssetToken) public s_tokenToAssetToken;
+    mapping(IERC20 => AssetToken) public s_tokenToAssetToken; // £explain: maps tokens to assetToken.  
 
     // The fee in WEI, it should have 18 decimals. Each flash loan takes a flat fee of the token price.
-    uint256 private s_feePrecision;
+    uint256 private s_feePrecision; // £audit-info: should be immutable or constant
     uint256 private s_flashLoanFee; // 0.3% ETH fee
 
     mapping(IERC20 token => bool currentlyFlashLoaning) private s_currentlyFlashLoaning;
@@ -125,6 +125,7 @@ contract ThunderLoan is Initializable, OwnableUpgradeable, UUPSUpgradeable, Orac
         }
         _;
     }
+    // £checked
 
     /*//////////////////////////////////////////////////////////////
                                FUNCTIONS
@@ -137,23 +138,32 @@ contract ThunderLoan is Initializable, OwnableUpgradeable, UUPSUpgradeable, Orac
     /*//////////////////////////////////////////////////////////////
                            EXTERNAL FUNCTIONS
     //////////////////////////////////////////////////////////////*/
+    // //£ audit low: after deploying contract, someone else can initialise.. 
+    // initializers can be front run. 
     function initialize(address tswapAddress) external initializer {
         __Ownable_init(msg.sender);
         __UUPSUpgradeable_init();
-        __Oracle_init(tswapAddress);
+        __Oracle_init(tswapAddress); // £info usign tswap as some kind of oracle 
         // £audit-info? Magic number (not mentioned in my aderyn... but is in patrick's. interesting.)
         s_feePrecision = 1e18; 
-        s_flashLoanFee = 3e15; // 0.3% ETH fee
+        s_flashLoanFee = 3e15; // 0.3% ETH fee == s_flashLoanFee / s_feePrecision
     }
 
+    // @audit-info: Where is the natspec?! 
     function deposit(IERC20 token, uint256 amount) external revertIfZero(amount) revertIfNotAllowedToken(token) {
         AssetToken assetToken = s_tokenToAssetToken[token];
         uint256 exchangeRate = assetToken.getExchangeRate();
+        // £info: this should never be zeo because of asset conditional. 
         uint256 mintAmount = (amount * assetToken.EXCHANGE_RATE_PRECISION()) / exchangeRate;
         emit Deposit(msg.sender, token, amount);
         assetToken.mint(msg.sender, mintAmount);
+
+        // audit: follow up. this smells. 
+        // £question: Why calculate fee at deposit?! 
         uint256 calculatedFee = getCalculatedFee(token, amount);
         assetToken.updateExchangeRate(calculatedFee);
+
+        // £note: the money goes to the assetToken Contract. Not Thunderloan. 
         token.safeTransferFrom(msg.sender, address(assetToken), amount);
     }
 
@@ -179,11 +189,12 @@ contract ThunderLoan is Initializable, OwnableUpgradeable, UUPSUpgradeable, Orac
         assetToken.transferUnderlyingTo(msg.sender, amountUnderlying);
     }
 
+    // £ audit-info: no natspe?! 
     function flashloan(
-        address receiverAddress,
-        IERC20 token,
-        uint256 amount,
-        bytes calldata params
+        address receiverAddress, // address to get flash loaned tokens 
+        IERC20 token, // the type of token to borrow.  
+        uint256 amount, // the amount of the token to borrow
+        bytes calldata params // the params to call receiverAddress 
     )
         external
         revertIfZero(amount)
@@ -232,6 +243,7 @@ contract ThunderLoan is Initializable, OwnableUpgradeable, UUPSUpgradeable, Orac
         }
         s_currentlyFlashLoaning[token] = false;
     }
+    // £checked. 
 
     // £audit-low: functions not used internally can be set external.  
     function repay(IERC20 token, uint256 amount) public {
@@ -242,10 +254,12 @@ contract ThunderLoan is Initializable, OwnableUpgradeable, UUPSUpgradeable, Orac
         token.safeTransferFrom(msg.sender, address(assetToken), amount);
     }
 
+    // £ audit info: no natspec 
+    // £notice: if you don't have name or symbol - does not work. (they are aware)
     function setAllowedToken(IERC20 token, bool allowed) external onlyOwner returns (AssetToken) {
         if (allowed) {
             if (address(s_tokenToAssetToken[token]) != address(0)) {
-                revert ThunderLoan__AlreadyAllowed();
+                revert ThunderLoan__AlreadyAllowed(); // £audit-info: include token here in error message? 
             }
             string memory name = string.concat("ThunderLoan ", IERC20Metadata(address(token)).name());
             string memory symbol = string.concat("tl", IERC20Metadata(address(token)).symbol());
@@ -261,8 +275,11 @@ contract ThunderLoan is Initializable, OwnableUpgradeable, UUPSUpgradeable, Orac
         }
     }
 
+    // £q: How is this calculated? 
+    // note: fee is calculated using value of token (taken from getPriceInWeth).  
     function getCalculatedFee(IERC20 token, uint256 amount) public view returns (uint256 fee) {
         //slither-disable-next-line divide-before-multiply
+        // £ check how this value is actually calculated - might have mistakes in it.  
         uint256 valueOfBorrowedToken = (amount * getPriceInWeth(address(token))) / s_feePrecision;
         //slither-disable-next-line divide-before-multiply
         fee = (valueOfBorrowedToken * s_flashLoanFee) / s_feePrecision;
@@ -276,6 +293,8 @@ contract ThunderLoan is Initializable, OwnableUpgradeable, UUPSUpgradeable, Orac
         s_flashLoanFee = newFee;
     }
 
+    // £note: if s_tokenToAssetToken is at anytime incorrectly set, tokens will not be accepted. 
+    // £question: can this be reset poorly? 
     function isAllowedToken(IERC20 token) public view returns (bool) {
         return address(s_tokenToAssetToken[token]) != address(0);
     }

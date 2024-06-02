@@ -21,6 +21,9 @@ contract AssetToken is ERC20 {
     // The underlying per asset exchange rate
     // ie: s_exchangeRate = 2
     // means 1 asset token is worth 2 underlying tokens
+    // £ explain: underlying = USDC 
+    // £ explain: assetToken = shares. 
+    // £ explain: it is a bit like how Compound works apperently. 
     uint256 private s_exchangeRate;
     uint256 public constant EXCHANGE_RATE_PRECISION = 1e18;
     uint256 private constant STARTING_EXCHANGE_RATE = 1e18;
@@ -52,7 +55,7 @@ contract AssetToken is ERC20 {
     //////////////////////////////////////////////////////////////*/
     constructor(
         address thunderLoan,
-        IERC20 underlying,
+        IERC20 underlying, // £note: so ERc tokens are stored in AssetToken.sol? 
         string memory assetName,
         string memory assetSymbol
     )
@@ -65,6 +68,7 @@ contract AssetToken is ERC20 {
         s_exchangeRate = STARTING_EXCHANGE_RATE;
     }
 
+    // £note only thunderloan can mint.. 
     function mint(address to, uint256 amount) external onlyThunderLoan {
         _mint(to, amount);
     }
@@ -73,19 +77,27 @@ contract AssetToken is ERC20 {
         _burn(account, amount);
     }
 
+
     function transferUnderlyingTo(address to, uint256 amount) external onlyThunderLoan {
         i_underlying.safeTransfer(to, amount);
+            // £ Q what about ERC20s? 
+            // £ Q what if USDC blacklists thunderloan or asset token contract? 
     }
+    
 
     function updateExchangeRate(uint256 fee) external onlyThunderLoan {
+        // £clean up natspec? 
         // 1. Get the current exchange rate
         // 2. How big the fee is should be divided by the total supply
         // 3. So if the fee is 1e18, and the total supply is 2e18, the exchange rate be multiplied by 1.5
         // if the fee is 0.5 ETH, and the total supply is 4, the exchange rate should be multiplied by 1.125
-        // it should always go up, never down
+        // it should always go up, never down -- £ == invariant, but why?
         // newExchangeRate = oldExchangeRate * (totalSupply + fee) / totalSupply
         // newExchangeRate = 1 (4 + 0.5) / 4
         // newExchangeRate = 1.125
+
+        // £ q what if totalSupply = 0? Divide by 0, will break. Issues?   
+        // £ audit-gas? Also: a LOT of reading from storage variables. Is this an issue? 
         uint256 newExchangeRate = s_exchangeRate * (totalSupply() + fee) / totalSupply();
 
         if (newExchangeRate <= s_exchangeRate) {
