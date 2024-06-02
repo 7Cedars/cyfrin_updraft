@@ -159,7 +159,8 @@ contract ThunderLoan is Initializable, OwnableUpgradeable, UUPSUpgradeable, Orac
         assetToken.mint(msg.sender, mintAmount);
 
         // audit: follow up. this smells. 
-        // £question: Why calculate fee at deposit?! 
+        // £ question: Why calculate fee at deposit?! 
+        // £ audit-high: The exchange rate should NOT be updated at deposit! -- this breaks the protocol: people cannot deposit. 
         uint256 calculatedFee = getCalculatedFee(token, amount);
         assetToken.updateExchangeRate(calculatedFee);
 
@@ -246,6 +247,7 @@ contract ThunderLoan is Initializable, OwnableUpgradeable, UUPSUpgradeable, Orac
     // £checked. 
 
     // £audit-low: functions not used internally can be set external.  
+    // £audit-low: you cannot use repay function inside another flash loan. 
     function repay(IERC20 token, uint256 amount) public {
         if (!s_currentlyFlashLoaning[token]) {
             revert ThunderLoan__NotCurrentlyFlashLoaning();
@@ -275,11 +277,17 @@ contract ThunderLoan is Initializable, OwnableUpgradeable, UUPSUpgradeable, Orac
         }
     }
 
-    // £q: How is this calculated? 
+    // £audit-high: mixes up weth with token amounts when calculating fees. 
+    // If the fee is in the token, fee should be in token, not weth. 
+    // impact: prices are wrong> medium or high. 
+    // likelyhood: very high. 
     // note: fee is calculated using value of token (taken from getPriceInWeth).  
+    // param: token = token being borrowed. 
+    // param: amount: the amoutn being borrowed. 
     function getCalculatedFee(IERC20 token, uint256 amount) public view returns (uint256 fee) {
         //slither-disable-next-line divide-before-multiply
         // £ check how this value is actually calculated - might have mistakes in it.  
+        // the VALUE of the token is used (ionstead of some amount of token) - value is calculated from extenral (TSwap) contract.  
         uint256 valueOfBorrowedToken = (amount * getPriceInWeth(address(token))) / s_feePrecision;
         //slither-disable-next-line divide-before-multiply
         fee = (valueOfBorrowedToken * s_flashLoanFee) / s_feePrecision;
@@ -294,7 +302,7 @@ contract ThunderLoan is Initializable, OwnableUpgradeable, UUPSUpgradeable, Orac
     }
 
     // £note: if s_tokenToAssetToken is at anytime incorrectly set, tokens will not be accepted. 
-    // £question: can this be reset poorly? 
+    // £ question: can this be reset poorly? 
     function isAllowedToken(IERC20 token) public view returns (bool) {
         return address(s_tokenToAssetToken[token]) != address(0);
     }

@@ -79,9 +79,9 @@ contract AssetToken is ERC20 {
 
 
     function transferUnderlyingTo(address to, uint256 amount) external onlyThunderLoan {
-        i_underlying.safeTransfer(to, amount);
-            // £ Q what about ERC20s? 
-            // £ Q what if USDC blacklists thunderloan or asset token contract? 
+        i_underlying.safeTransfer(to, amount); 
+            // £ audit-medium: if address gets blocked (see USDC, denylisted) then this will fail. 
+            // protocol will be blocked. 
     }
     
 
@@ -96,7 +96,6 @@ contract AssetToken is ERC20 {
         // newExchangeRate = 1 (4 + 0.5) / 4
         // newExchangeRate = 1.125
 
-        // £ q what if totalSupply = 0? Divide by 0, will break. Issues?   
         // £ audit-gas? Also: a LOT of reading from storage variables. Is this an issue? 
         uint256 newExchangeRate = s_exchangeRate * (totalSupply() + fee) / totalSupply();
 

@@ -17,12 +17,12 @@ contract OracleUpgradeable is Initializable {
         s_poolFactory = poolFactoryAddress;
     }
     
-    // £question: can price be manipulated?? 
+    // £ question: can price be manipulated?? 
     // check tests -- 
     // calling an external contract and function as price oracle brings up loads of questions.. 
     function getPriceInWeth(address token) public view returns (uint256) {
         address swapPoolOfToken = IPoolFactory(s_poolFactory).getPool(token);
-        // £question: what if the token has 6 decimals, will the price be wrong? 
+        // £ question: what if the token has 6 decimals, will the price be wrong? 
         return ITSwapPool(swapPoolOfToken).getPriceOfOnePoolTokenInWeth();
     }
 
