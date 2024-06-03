@@ -70,7 +70,7 @@ Place the following in `ThunderLoanTest.t.sol`
     }
 ```
 
-### [H-2] the `ThunderLoan::deposit` function can be called with borrowed money from `ThunderLoan::flashloan`, allowing draining of all funds through taking fees and exchange rate manipulation.
+### [H-2] The `ThunderLoan::deposit` function can be called with borrowed money from `ThunderLoan::flashloan`, allowing draining of all funds through taking fees and exchange rate manipulation.
 
 **Description:** 
 TO DO 
@@ -83,6 +83,70 @@ TO DO -- see test file.
 
 **Recommended Mitigation:** 
 TO DO 
+
+### [H-3] Mixing up variable location causes storage collision in `ThunderLoan::s_flashLoanFee` and `ThunderLoan::s_currentlyFlashLoaning`, freezing protocol.
+
+**Description:** 
+`ThunderLoan.sol` has two storage variables in the following order: 
+
+```javascript
+    uint256 private s_feePrecision; 
+    uint256 private s_flashLoanFee; 
+```
+
+However, `ThunderLoanUpgraded.sol` has them in a different order. 
+
+```javascript
+    uint256 private s_flashLoanFee;  
+    uint256 public constant FEE_PRECISION = 1e18;
+```
+
+Due to how solidity storage works, after the upgrade the `s_flashLoanFee` will have the value of `s_feePrecision`. You cannot adjust the position of storage variables, and removing storage variables for constant variables, also breaks storage location. 
+
+**Impact:** 
+After the upgrade the `s_flashLoanFee` will have the value of `s_feePrecision`. As a result, users will pay the wrong fee. Worse, the `s_currentlyFlashLoaning` starts in the wrong stroage slot, breaking the protocol. 
+
+**Proof of Concept:**
+1. Initial contract is deployed. 
+2. Owner of contract deploys upgrade. 
+3. Fee structure breaks.  
+
+<detail> 
+<summary> Proof of Concept </summary> 
+
+Place the following in `ThunderLoanTest.t.sol`. 
+
+```javascript
+    import { ThunderLoanUpgraded } from  "../../src/upgradedProtocol/ThunderLoanUpgraded.sol";
+
+    function testUpgradesBreaks() public {
+        uint256 feeBeforeUpgrade = thunderLoan.getFee(); 
+        vm.startPrank(thunderLoan.owner()); 
+        ThunderLoanUpgraded upgraded = new ThunderLoanUpgraded();
+        thunderLoan.upgradeToAndCall(address(upgraded), ""); 
+        uint256 feeAfterUpgrade = thunderLoan.getFee(); 
+        vm.stopPrank(); 
+
+        console2.log("fee before upgrade:", feeBeforeUpgrade);  
+        console2.log("fee after upgrade:", feeAfterUpgrade); 
+
+        assert(feeBeforeUpgrade != feeAfterUpgrade); 
+    }  
+```
+
+You can also see the storage difference by running `forge inspect ThunderLoan storage` and `forge inspect ThunderLoanUpgraded storage`. 
+</detail>
+
+**Recommended Mitigation:** If you must remove the storage variable, leave it blank to avoid mixing storage slots.  
+
+```diff 
+-    uint256 private s_flashLoanFee; 
+-    uint256 public constant FEE_PRECISION = 1e18;
++    int256 private s_blank;
++    int256 private s_flashLoanFee;
++    uint256 public constant FEE_PRECISION = 1e18;
+
+```
 
 
 ## Medium 

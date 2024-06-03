@@ -5,6 +5,7 @@ import { Test, console, console2 } from "forge-std/Test.sol";
 import { BaseTest, ThunderLoan } from "./BaseTest.t.sol";
 import { AssetToken } from "../../src/protocol/AssetToken.sol";
 import { IFlashLoanReceiver } from "../../src/interfaces/IFlashLoanReceiver.sol";
+import { ThunderLoanUpgraded } from  "../../src/upgradedProtocol/ThunderLoanUpgraded.sol";
 
 import { MockFlashLoanReceiver } from "../mocks/MockFlashLoanReceiver.sol";
 import { ERC20Mock } from "../mocks/ERC20Mock.sol"; 
@@ -177,6 +178,21 @@ contract ThunderLoanTest is BaseTest {
         
         assert(tokenA.balanceOf(address(dor)) > 50e18 + fee); 
     }
+
+
+    function testUpgradesBreaks() public {
+        uint256 feeBeforeUpgrade = thunderLoan.getFee(); 
+        vm.startPrank(thunderLoan.owner()); 
+        ThunderLoanUpgraded upgraded = new ThunderLoanUpgraded();
+        thunderLoan.upgradeToAndCall(address(upgraded), ""); 
+        uint256 feeAfterUpgrade = thunderLoan.getFee(); 
+        vm.stopPrank(); 
+
+        console2.log("fee before upgrade:", feeBeforeUpgrade);  
+        console2.log("fee after upgrade:", feeAfterUpgrade); 
+
+        assert(feeBeforeUpgrade != feeAfterUpgrade); 
+    }  
 } 
 
 contract MaliciousFlashLoanReceiver is IFlashLoanReceiver { 
