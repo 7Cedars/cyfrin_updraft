@@ -70,6 +70,21 @@ Place the following in `ThunderLoanTest.t.sol`
     }
 ```
 
+### [H-2] the `ThunderLoan::deposit` function can be called with borrowed money from `ThunderLoan::flashloan`, allowing draining of all funds through taking fees and exchange rate manipulation.
+
+**Description:** 
+TO DO 
+
+**Impact:** 
+TO DO 
+
+**Proof of Concept:**
+TO DO -- see test file. 
+
+**Recommended Mitigation:** 
+TO DO 
+
+
 ## Medium 
 
 ### [M-1] Using Tswap as price Oracle leads to users getting cheaper borrowing fees. 
