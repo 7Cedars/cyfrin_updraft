@@ -23,7 +23,7 @@ contract AssetToken is ERC20 {
     // means 1 asset token is worth 2 underlying tokens
     // £ explain: underlying = USDC 
     // £ explain: assetToken = shares. 
-    // £ explain: it is a bit like how Compound works apperently. 
+    // £ explain: it is a bit like how Compound works apparently. 
     uint256 private s_exchangeRate;
     uint256 public constant EXCHANGE_RATE_PRECISION = 1e18;
     uint256 private constant STARTING_EXCHANGE_RATE = 1e18;
@@ -80,13 +80,12 @@ contract AssetToken is ERC20 {
 
     function transferUnderlyingTo(address to, uint256 amount) external onlyThunderLoan {
         i_underlying.safeTransfer(to, amount); 
-            // £ audit-medium: if address gets blocked (see USDC, denylisted) then this will fail. 
+            // £ skipped - protocol is aware. if address gets blocked (see USDC, denylisted) then this will fail. 
             // protocol will be blocked. 
     }
-    
 
     function updateExchangeRate(uint256 fee) external onlyThunderLoan {
-        // £clean up natspec? 
+        //
         // 1. Get the current exchange rate
         // 2. How big the fee is should be divided by the total supply
         // 3. So if the fee is 1e18, and the total supply is 2e18, the exchange rate be multiplied by 1.5
@@ -96,7 +95,7 @@ contract AssetToken is ERC20 {
         // newExchangeRate = 1 (4 + 0.5) / 4
         // newExchangeRate = 1.125
 
-        // £ audit-gas? Also: a LOT of reading from storage variables. Is this an issue? 
+        // £ report-written Also: a LOT of reading from storage variables. Is this an issue? 
         uint256 newExchangeRate = s_exchangeRate * (totalSupply() + fee) / totalSupply();
 
         if (newExchangeRate <= s_exchangeRate) {

