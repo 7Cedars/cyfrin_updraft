@@ -27,11 +27,12 @@ import { L1Vault } from "./L1Vault.sol";
 contract L1BossBridge is Ownable, Pausable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
+    // £audit-info (see slither) should be constant. 
     uint256 public DEPOSIT_LIMIT = 100_000 ether;
 
-    IERC20 public immutable token;
-    L1Vault public immutable vault;
-    mapping(address account => bool isSigner) public signers;
+    IERC20 public immutable token; // one bridge = one token. 
+    L1Vault public immutable vault; // one vault = one token. 
+    mapping(address account => bool isSigner) public signers; // users that can send l1 -> l2 
 
     error L1BossBridge__DepositLimitReached();
     error L1BossBridge__Unauthorized();
@@ -43,6 +44,7 @@ contract L1BossBridge is Ownable, Pausable, ReentrancyGuard {
         token = _token;
         vault = new L1Vault(token);
         // Allows the bridge to move tokens out of the vault to facilitate withdrawals
+        // £audit see second audit-high at depositTokensToL2 
         vault.approveTo(address(this), type(uint256).max);
     }
 
@@ -54,6 +56,7 @@ contract L1BossBridge is Ownable, Pausable, ReentrancyGuard {
         _unpause();
     }
 
+    // £q: what happens if account is disabled midflight?   
     function setSigner(address account, bool enabled) external onlyOwner {
         signers[account] = enabled;
     }
@@ -67,13 +70,22 @@ contract L1BossBridge is Ownable, Pausable, ReentrancyGuard {
      * @param l2Recipient The address of the user who will receive the tokens on L2
      * @param amount The amount of tokens to deposit
      */
+    // £audit-high. See slither ouput: arbitrary from value. -- PoC written in test suite.
+    // It allows a userB to transfer tokens of userA userB can steal their funds on the L2. - by setting their own l2Recipient!
+    // in a way.. .they use funds from userA to pay for userB tokens on the L2. 
+    // £answer No: Tokens are still always moved into the vault. It is just another user that moves them.  
+
+    // £audit-high: by setting 'from' as the vault, and the l2Recipient as attacker address, it is possible to mint almost unlimited amount of L2 tokens. 
+    // £note: this is possible because vault has full approval to move tokens around. hence vault can transfer tokens to themselves. 
     function depositTokensToL2(address from, address l2Recipient, uint256 amount) external whenNotPaused {
         if (token.balanceOf(address(vault)) + amount > DEPOSIT_LIMIT) {
             revert L1BossBridge__DepositLimitReached();
         }
         token.safeTransferFrom(from, address(vault), amount);
 
+        // £NB! without proper emit event, whole protocol breaks. £q is there a way to break this? 
         // Our off-chain service picks up this event and mints the corresponding tokens on L2
+        // £audit-info: should follow CEI. (ideally before transferFrom. )
         emit Deposit(from, l2Recipient, amount);
     }
 
@@ -109,6 +121,8 @@ contract L1BossBridge is Ownable, Pausable, ReentrancyGuard {
      * @param s The s value of the signature
      * @param message The message/data to be sent to L1 (can be blank)
      */
+
+    
     function sendToL1(uint8 v, bytes32 r, bytes32 s, bytes memory message) public nonReentrant whenNotPaused {
         address signer = ECDSA.recover(MessageHashUtils.toEthSignedMessageHash(keccak256(message)), v, r, s);
 
@@ -118,6 +132,7 @@ contract L1BossBridge is Ownable, Pausable, ReentrancyGuard {
 
         (address target, uint256 value, bytes memory data) = abi.decode(message, (address, uint256, bytes));
 
+        // £q: slither has a high here. Is it indeed an issue?  
         (bool success,) = target.call{ value: value }(data);
         if (!success) {
             revert L1BossBridge__CallFailed();

@@ -21,13 +21,16 @@ contract TokenFactory is Ownable {
      * @param contractBytecode The bytecode of the new token
      */
     function deployToken(string memory symbol, bytes memory contractBytecode) public onlyOwner returns (address addr) {
+        // £q: why use assembly here? 
+        // audit-high: this won't work on zksync. See docs zksync era. 
         assembly {
             addr := create(0, add(contractBytecode, 0x20), mload(contractBytecode))
         }
         s_tokenToAddress[symbol] = addr;
         emit TokenDeployed(symbol, addr);
     }
-
+    
+    // £q prob should be external 
     function getTokenAddressFromSymbol(string memory symbol) public view returns (address addr) {
         return s_tokenToAddress[symbol];
     }

