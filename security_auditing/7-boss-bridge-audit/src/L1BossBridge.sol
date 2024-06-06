@@ -44,7 +44,7 @@ contract L1BossBridge is Ownable, Pausable, ReentrancyGuard {
         token = _token;
         vault = new L1Vault(token);
         // Allows the bridge to move tokens out of the vault to facilitate withdrawals
-        // £audit see second audit-high at depositTokensToL2 
+        // £report-written see second audit-high at depositTokensToL2 
         vault.approveTo(address(this), type(uint256).max);
     }
 
@@ -70,12 +70,11 @@ contract L1BossBridge is Ownable, Pausable, ReentrancyGuard {
      * @param l2Recipient The address of the user who will receive the tokens on L2
      * @param amount The amount of tokens to deposit
      */
-    // £audit-high. See slither ouput: arbitrary from value. -- PoC written in test suite.
+    // £report-written. See slither ouput: arbitrary from value. -- PoC written in test suite.
     // It allows a userB to transfer tokens of userA userB can steal their funds on the L2. - by setting their own l2Recipient!
     // in a way.. .they use funds from userA to pay for userB tokens on the L2. 
-    // £answer No: Tokens are still always moved into the vault. It is just another user that moves them.  
 
-    // £audit-high: by setting 'from' as the vault, and the l2Recipient as attacker address, it is possible to mint almost unlimited amount of L2 tokens. 
+    // £report-written: by setting 'from' as the vault, and the l2Recipient as attacker address, it is possible to mint almost unlimited amount of L2 tokens. 
     // £note: this is possible because vault has full approval to move tokens around. hence vault can transfer tokens to themselves. 
     function depositTokensToL2(address from, address l2Recipient, uint256 amount) external whenNotPaused {
         if (token.balanceOf(address(vault)) + amount > DEPOSIT_LIMIT) {
@@ -124,11 +123,11 @@ contract L1BossBridge is Ownable, Pausable, ReentrancyGuard {
 
     
     function sendToL1(uint8 v, bytes32 r, bytes32 s, bytes memory message) public nonReentrant whenNotPaused {
+        bytes memory signature = abi.encodePacked(r, s, v); 
         address signer = ECDSA.recover(MessageHashUtils.toEthSignedMessageHash(keccak256(message)), v, r, s);
 
-        // £audit-high: signature replay is possible. 
+        // £report-written: signature replay is possible. 
         // remedy: insert a nonce & check that it can only be used once. 
-        // also: DO NOT SEND RAW SIGNATURE ON CHAIN! -- this might be harder than it seems. Also with signing through metamask - you put signature on chain. I think. Or not? 
         if (!signers[signer]) {
             revert L1BossBridge__Unauthorized();
         }
