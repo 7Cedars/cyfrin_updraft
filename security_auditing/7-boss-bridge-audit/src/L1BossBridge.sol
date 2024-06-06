@@ -126,13 +126,20 @@ contract L1BossBridge is Ownable, Pausable, ReentrancyGuard {
     function sendToL1(uint8 v, bytes32 r, bytes32 s, bytes memory message) public nonReentrant whenNotPaused {
         address signer = ECDSA.recover(MessageHashUtils.toEthSignedMessageHash(keccak256(message)), v, r, s);
 
+        // £audit-high: signature replay is possible. 
+        // remedy: insert a nonce & check that it can only be used once. 
+        // also: DO NOT SEND RAW SIGNATURE ON CHAIN! -- this might be harder than it seems. Also with signing through metamask - you put signature on chain. I think. Or not? 
         if (!signers[signer]) {
             revert L1BossBridge__Unauthorized();
         }
 
         (address target, uint256 value, bytes memory data) = abi.decode(message, (address, uint256, bytes));
 
-        // £q: slither has a high here. Is it indeed an issue?  
+        // £q: slither has a high here. Is it indeed an issue? YES
+        // £audit-high: message from user (see  bytes memory message) is not checked before send straight to vault (target). 
+        // as the vault has fur priviledged access to tokens, it is real easy to just tell the bridge to send all tokens. - especially as you can take signature. 
+
+        // £audit-medium: gas bomb: you can put a crazy high gas cost action in the message, and DoS the protocol. 
         (bool success,) = target.call{ value: value }(data);
         if (!success) {
             revert L1BossBridge__CallFailed();
