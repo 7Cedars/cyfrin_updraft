@@ -4,6 +4,7 @@ pragma solidity 0.8.20;
 import {RamNFT} from "./RamNFT.sol";
 
 contract ChoosingRam {
+    // £checked: how many events need to be added? 
     // £audit-low/info again: include (indexed) vars in errors and events.   
     error ChoosingRam__InvalidTokenIdOfChallenger();
     error ChoosingRam__InvalidTokenIdOfPerticipent();
@@ -64,8 +65,8 @@ contract ChoosingRam {
             uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrandao, msg.sender))) % 2; // £note / audit low?: this should be 1? now chance is not 50 / 50?   
 
         // audit-gas: this should be a mapping (or enum -> just add value of 1 each time: as the increase in power is ordinal). -- or: mapping! See elsewhere: change function accordingly. 
-        // £question slither: Reentrancy in ChoosingRam.increaseValuesOfParticipants(uint256,uint256) (src/ChoosingRam.sol#37-99): 
-        // £question: is this really an issue here? Would be interesting to try and exploit it. 
+        // £audit?: slither: Reentrancy in ChoosingRam.increaseValuesOfParticipants(uint256,uint256) (src/ChoosingRam.sol#37-99): 
+        // £audit?: is this really an issue here? Would be interesting to try and exploit it. 
         // £ it might be possible to re-enter and in one go upgrade all the way. -- maybe mention in passing? // when proposed remedy? 
         if (random == 0) {
             if (ramNFT.getCharacteristics(tokenIdOfChallenger).isJitaKrodhah == false){
@@ -78,7 +79,7 @@ contract ChoosingRam {
                 ramNFT.updateCharacteristics(tokenIdOfChallenger, true, true, true, true, false);
             } else if (ramNFT.getCharacteristics(tokenIdOfChallenger).isSatyavaakyah == false){
                 ramNFT.updateCharacteristics(tokenIdOfChallenger, true, true, true, true, true);
-                // £question. WHAT?! is selectedRam set here as well?! 
+                // £checked WHAT?! is selectedRam set here as well?! YEP  
                 // £audit-high: it allows for selectedRam to be set AFTER selectRamIfNotSelected has been called. 
                 selectedRam = ramNFT.getCharacteristics(tokenIdOfChallenger).ram;
             }
@@ -93,10 +94,8 @@ contract ChoosingRam {
                 ramNFT.updateCharacteristics(tokenIdOfAnyPerticipent, true, true, true, true, false);
             } else if (ramNFT.getCharacteristics(tokenIdOfAnyPerticipent).isSatyavaakyah == false){
                 ramNFT.updateCharacteristics(tokenIdOfAnyPerticipent, true, true, true, true, true);
-                // £question. WHAT?! is selectedRam set here as well?! 
-                // £question: it does NOT set isRamSelected = true; How does this impact protocol?
-                // £audit-high: it allows for selectedRam to be set AFTER selectRamIfNotSelected has been called. 
-                // £note: this also applies to the bit above.   
+                // checked. WHAT?! is selectedRam set here as well?! YEP 
+                // £audit-high: it allows for selectedRam to be set AFTER selectRamIfNotSelected has been called.   
                 selectedRam = ramNFT.getCharacteristics(tokenIdOfAnyPerticipent).ram;
             }
         }
@@ -104,12 +103,14 @@ contract ChoosingRam {
 
     // £info: this function selects a ram supposedly randomly.
     // £audit: note that date is a magic number! 
-    // £question: do all these number actually align?! (prob not...)  
-    // £question how much time is there to call this function? CHECK!  
+    // £audit-low: if organiser waits till the last minute to select ram, there is only 69 seconds left to call killRavana. 
+    // £ (max is 24 hours) -- see notes.md 
+    // £checked how much time is there to call this function? CHECK! 
     function selectRamIfNotSelected() public RamIsNotSelected OnlyOrganiser {
         if (block.timestamp < 1728691200) {
             revert ChoosingRam__TimeToBeLikeRamIsNotFinish();
         }
+        // £audit (centralisation?) if organiser does not pick before certain time, participants will not be able to claim reward. 
         if (block.timestamp > 1728777600) {
             revert ChoosingRam__EventIsFinished();
         }
@@ -117,6 +118,7 @@ contract ChoosingRam {
         uint256 random = uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrandao))) % ramNFT.tokenCounter();
         // £audit-gas/low do not need two separate state variables for this.
         selectedRam = ramNFT.getCharacteristics(random).ram;
+        // £audit-info: needs to emit event
         isRamSelected = true;
     }
 }

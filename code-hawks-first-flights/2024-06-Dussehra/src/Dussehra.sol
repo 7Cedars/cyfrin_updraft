@@ -6,7 +6,7 @@ import {ChoosingRam} from "./ChoosingRam.sol";
 import {RamNFT} from "./RamNFT.sol";
 
 contract Dussehra {
-    // £question: this means this is a payable address, but I do not see a receive or fallback function. 
+    // checked: this means this is a payable address, but I do not see a receive or fallback function. 
     // what happens if you just send money here? -- it DOES have a sendValue function. -- THIS IS AN INTERNAL FUNCTION! CANNOT BE CALLED EXTERNALLY. 
     // BUT: what are functions from Address packacge not used?! -- include in remedees?  
     // £audit-high: ANY Ether send to this contract directly, will be stuck. There is NO way to retrieve it!  So if someone accidentally sends entry fee directly. too bad. 
@@ -25,14 +25,14 @@ contract Dussehra {
     address public organiser; // £audit info: should be immutable. 
     address public SelectedRam; // fine I think... 
     RamNFT public ramNFT;
-    bool public IsRavanKilled; // £q: better to set to private? 
-    mapping (address competitor => bool isPresent) public peopleLikeRam; // see above, doubles with WantToBeLikeRam
+    bool public IsRavanKilled; // £checked: better to set to internal? - no: a getter function is not a bad thing in this case.   
+    mapping (address competitor => bool isPresent) public peopleLikeRam; //  £audit-gas see above, doubles with WantToBeLikeRam
     
-    uint256 public totalAmountGivenToRam; // £q: better to set to internal or private? (no getter function, saves gas?) 
-    ChoosingRam public choosingRamContract; // £q: better to set to private? 
+    uint256 public totalAmountGivenToRam; // £skip: better to set to internal or private? (no getter function, saves gas?) 
+    ChoosingRam public choosingRamContract; // £skip: better to set to private? 
 
-    // £question add indexed? 
-    // £question: how many additional events should be added? 
+    // £skip add indexed? 
+    // checked: how many additional events should be added? 
     event PeopleWhoLikeRamIsEntered(address competitor);
 
     modifier RamIsSelected() {
@@ -55,13 +55,19 @@ contract Dussehra {
     constructor(uint256 _entranceFee, address _choosingRamContract, address _ramNFT) {
         entranceFee = _entranceFee;
         // £notice: BOTH dussehra AND RamNFT have a 'organiser' state variable. What happens if these are not the same? 
-        // £question: or more precise: what are the priviledges of these two 'organiser's? How can/do they interfere with each other?  
+        // checked: or more precise: what are the priviledges of these two 'organiser's? How can/do they interfere with each other?
+        // I think the trick is that it allows for resetting of address linked to NFTs. see RamNFT.   
         organiser = msg.sender; 
         // £notice: no zero check, no interface check. Any kind of RamNFT contract can be added here. 
+        // £audit-info: needs to emit event
         ramNFT = RamNFT(_ramNFT);
-        // £audit-high: this CALLS A FUNCTION to set the choosingRamContract. should set directly as is done with ramNFT. 
+    
+        // £checked: this CALLS A FUNCTION [no it does NOT]! to set the choosingRamContract. should set directly as is done with ramNFT. 
+        // £notice: no zero check, no interface check. Any kind of RamNFT contract can be added here. 
         // £note: this combines with notes I have at the function `ChoosingRam`. 
+        // £audit-info: needs to emit event
         choosingRamContract = ChoosingRam(_choosingRamContract);
+        
     }
 
     // £notes this function manages people's entree into the protocol. 
@@ -70,8 +76,8 @@ contract Dussehra {
     // £audit-info slither: Boolean constants can be used directly and do not need to be compare to true or false.
     function enterPeopleWhoLikeRam() public payable {
         // £audit-low / info: now people have to enter with exact fee. Would possibly be better to say smaller than? 
-        // £note watch out: is somewhere the value entranceFee * people used? This DOES have to be in report. 
-        // £what would happen if people send ether straight into contract? 
+        // £checked watch out: is somewhere the value entranceFee * people used? This DOES have to be in report. 
+        // £checked what would happen if people send ether straight into contract? => eth is stuck. 
         if (msg.value != entranceFee) {
             revert Dussehra__NotEqualToEntranceFee();
         }
@@ -85,17 +91,23 @@ contract Dussehra {
         // £audit-gas: why not use a simple counter? pushing to a list and then reading length of list = super gas inefficient. 
         WantToBeLikeRam.push(msg.sender);
         ramNFT.mintRamNFT(msg.sender);
-        // £question: possible CEI issue? -- emit should be before mintRamNFT? - slither picked this up. 
+        // £audit-low: possible CEI issue? -- emit should be before mintRamNFT? - slither picked this up. 
+        // it does not seem to have any major impact. 
         emit PeopleWhoLikeRamIsEntered(msg.sender);
     }
 
-    // £q: can anyone call this function?! 
+    // £checked: can anyone call this function?! YEP - but that is not the main issue. 
     // also people who have absolutely nothing to do with the protocol?!  
     // £slither picked up on low-level call. 
-    // audit-high: this function can be called mutlile times. It only needs to be called twice (before withdraw function is called) to have all funds end up with organiser = rug pull! 
+    // £audit the function is NOT checked on RavanisKilled. It can keep on being called.
+    // £audit-high: this function can be called mutlile times. It only needs to be called twice (before withdraw function is called) to have all funds end up with organiser = rug pull! 
     function killRavana() public RamIsSelected {
-        // £question: timestamp differs per chain? - would not be surprised if this is the case. 
-        // £question: also: timestamp can be altered. But how / to what extent? Need to find out..  
+        // £answer: how timestamp is set differs between chains, layout / decimals does not differ. I think.  
+            // on zkSync Era the operator controls the frequency of L2 blocks and, hence, can manipulate the block timestamp and block number
+            // on arbitrum ALSO different way, much more lenient. sequencer CAN adjust time.blockstamp. 
+            // £audit-medium/low and ehm BNB is being sunset! :D https://www.bnbchain.org/en/bnb-chain-fusion
+        //  
+        // £checked: timestamp can be altered on L1, but especially on L2! But how / to what extent? Need to find out..  
         if (block.timestamp < 1728691069) {
             revert Dussehra__MahuratIsNotStart();
         }
@@ -104,16 +116,18 @@ contract Dussehra {
         }
         // £audit-info Characteristic of ramNFT do not matter at all. When this function is called, ravan is killed. period. 
         // £this comes close to a scam? 
-        // £note the function is NOT checked on RavanisKilled. It can keep on being called. 
-        IsRavanKilled = true;
-        // £note this smells. bad. 
-        // £question YEP: what happens if people send ether straight into contract?! This next line will not be correct. 
-        // it should use balance!   
+        // £audit-info: needs to emit event 
+        IsRavanKilled = true;   
         // £audit high?: rounding error problem. if something does not divide by 2. What will happen?! - see also note below.  
         uint256 totalAmountByThePeople = WantToBeLikeRam.length * entranceFee;
         totalAmountGivenToRam = (totalAmountByThePeople * 50) / 100;
         // £note this is a low level call. should use sendValue.
         // £ANYONE can call this function. And it has a low level call to send eth to 'organiser'... AND does not follow CEI. 
+        // £audit-info: needs to emit event
+        // £audit-high if organiser is a contract without receive / payable or anything - this will fail. 
+        // -- pull over push. Better to have organiser pull the money - instead of pushing it. 
+        // NOTE: if organiser is a contract that is not payable - the protocol is 100% bricked. because this call will always fail, 
+        // ravana will not be killed, stopping everything else. 
         (bool success, ) = organiser.call{value: totalAmountGivenToRam}("");
         require(success, "Failed to send money to organiser");
     }
@@ -131,6 +145,7 @@ contract Dussehra {
         // £audit-low there is a check on who msg.sender is. But would be much clearer (and safer) to just use address selectedRam = choosingRamContract.selectedRam() 
         // AND use send value. The contract has this function from the imported Address package!
         // ALSO: this allows for reentrancy. ... but no way to really abuse this. right? (all eth has already been taken..)  
+        // £audit-info: needs to emit event
         (bool success, ) = msg.sender.call{value: amount}("");
 
         require(success, "Failed to send money to Ram");

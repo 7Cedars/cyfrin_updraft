@@ -2,7 +2,7 @@
 - 
 
 # INFO: Standard Work flow audit
-[ ] Scoping
+[x] Scoping
   [x] Read the docs: get a sense of what the protocol does.
     [x] Are roles defined? 
     [x] Any diagrams? Draw my own? 
@@ -38,7 +38,7 @@
     [ ] Input (0) checks missing? 
     [ ] Can functions be front run? Can people do something with the knowledge gained from transaction in mempool? 
     [ ] Oracle manipulation?  
-    [ ] Poorly implemented randomness? (or more basically: getting info from chain that can only safely be gotten from off[ ]chain)
+    [ ] Poorly implemented randomness? (or more basically: getting info from chain that can only safely be gotten from off-chain)
     [ ] Reentrancy weakness. 
     [ ] With upgradable contracts: Memory overwrites?
   [ ] Second pass: use solodits checklist (https://solodit.xyz/checklist) to go through contract again 

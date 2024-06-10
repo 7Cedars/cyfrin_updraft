@@ -2,6 +2,21 @@
 2. Argue for severity of issue. 
 3. Explain how to fix the issue. 
 
+Brief layout: 
+
+### [S-#] TITLE (Root Cause + Impact)
+
+**Description:** 
+
+**Impact:** 
+
+**Proof of Concept:**
+
+**Recommended Mitigation:** 
+
+
+Extensive layout: 
+
 ### [S-#] TITLE (Root Cause + Impact)
 
 **Description:** Explanation here. 
