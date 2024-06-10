@@ -1,5 +1,4 @@
 # next steps / where am i: 
-- go through contract and build a flow chart. 
 - 
 
 # INFO: Standard Work flow audit
@@ -19,14 +18,18 @@
     [x] Make a check list by complexity. (pincho method)
     [x] Check overview of how methods are called. 
     [x] Create sequence of how to review contracts. Where to start, how to continue. Probably simple to complex contracts. 
-[ ] Reconnaissance
+[x] Reconnaissance
   [x] Create an `audit` branch to work in.  
-  [ ] Run `slither .` and `aderyn .` on the code base. Make notes in the code of where issues were flagged.
-  [ ] Go through code in sequence decided earlier. 
-  [ ] Make notes, ask questions... get to know the code. 
+  [x] Run `slither .` on the code base. Make notes in the code of where issues were flagged.
+  [x] Run `aderyn .` on the code base. Make notes in the code of where issues were flagged.
+  [x] Go through code in sequence decided earlier. 
+  [x] Make notes, ask questions... get to know the code. 
 
 [ ] Vulnerability identification: 
-  [ ] First pass: Get the attacker mentality started: how to break what I see? The basic things to look out for:
+  [ ] First pass: Get the attacker mentality started: how to break what I see? 
+  [ ] When I think I found one: build PoC and check.
+    [ ] If indeed vulnerability, create report item: only title and ref to PoC. (I might find related issues, might get more insight etc.) 
+  [ ] The basic things to look out for:
     [ ] Insufficient Access control: Lacking (or wrong) role restrictions. 
     [ ] Governor attacks possible? / Centralization? 
     [ ] Signature Replay? 
@@ -38,11 +41,8 @@
     [ ] Poorly implemented randomness? (or more basically: getting info from chain that can only safely be gotten from off[ ]chain)
     [ ] Reentrancy weakness. 
     [ ] With upgradable contracts: Memory overwrites?
-  [ ] When I think I found one: build PoC and check.
-    [ ] If indeed vulnerability, create report item: only title and ref to PoC. (I might find related issues, might get more insight etc.) 
   [ ] Second pass: use solodits checklist (https://solodit.xyz/checklist) to go through contract again 
 
 [ ] Reporting
   [ ] See layout in this folder. 
-  [ ] Don't start doing this too late: note that well written reports also often get a price.  
-
+  [ ] Don't start doing this too late: note that well written reports also often get a price + writing up often takes quite some time. 

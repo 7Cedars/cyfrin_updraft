@@ -42,9 +42,9 @@ Three contracts:
 Hardly any tests. No fuzz tests, no invariant tests. 
 
 # Sequence
-1. RamNFT.sol
-2. Dussehra.sol
-3. ChoosingRam.sol
+1. RamNFT.sol - CHECK 
+2. Dussehra.sol - CHECK
+3. ChoosingRam.sol - 
 
 # Potential Attack Vectors 
 - see long list above. 
