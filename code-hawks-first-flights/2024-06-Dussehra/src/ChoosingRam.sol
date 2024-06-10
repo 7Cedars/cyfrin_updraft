@@ -13,6 +13,7 @@ contract ChoosingRam {
 
     bool public isRamSelected;
     RamNFT public ramNFT;
+
     address public selectedRam;
 
     modifier RamIsNotSelected() {
@@ -29,7 +30,10 @@ contract ChoosingRam {
         isRamSelected = false;
         ramNFT = RamNFT(_ramNFT);
     }
-
+    
+    // NB: £audit-info all natspec are missing. Hence very confusing....  
+    // @notice: this function raises value of either tokenIdOfChallenger OR tokenIdOfAnyPerticipent. 
+    // 
     function increaseValuesOfParticipants(uint256 tokenIdOfChallenger, uint256 tokenIdOfAnyPerticipent)
         public
         RamIsNotSelected
@@ -44,13 +48,20 @@ contract ChoosingRam {
             revert ChoosingRam__CallerIsNotChallenger();
         }
 
+        // £info: is with timestamp, gaming timestamp and how they work on different chains.  
         if (block.timestamp > 1728691200) {
             revert ChoosingRam__TimeToBeLikeRamFinish();
         }
         
+        // £audit-high: this is not random. 
         uint256 random =
             uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrandao, msg.sender))) % 2;
 
+        // £q: is not not super gas inefficient?! 
+        // £q: what is actually happening here? 
+        // £answer: This is where ramNft can be increased in power / characteristics. 
+        // £note: but look at how this is done... it just just amazingly stupidly gas inefficient. 
+        // audit-gas: this should be an enum. and just add value of 1 each time: as the increase in power is linear. 
         if (random == 0) {
             if (ramNFT.getCharacteristics(tokenIdOfChallenger).isJitaKrodhah == false){
                 ramNFT.updateCharacteristics(tokenIdOfChallenger, true, false, false, false, false);
@@ -80,6 +91,7 @@ contract ChoosingRam {
         }
     }
 
+    // £info: this function selects a ram  
     function selectRamIfNotSelected() public RamIsNotSelected OnlyOrganiser {
         if (block.timestamp < 1728691200) {
             revert ChoosingRam__TimeToBeLikeRamIsNotFinish();
@@ -87,6 +99,7 @@ contract ChoosingRam {
         if (block.timestamp > 1728777600) {
             revert ChoosingRam__EventIsFinished();
         }
+        // £audi high: again, this is not random. 
         uint256 random = uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrandao))) % ramNFT.tokenCounter();
         selectedRam = ramNFT.getCharacteristics(random).ram;
         isRamSelected = true;

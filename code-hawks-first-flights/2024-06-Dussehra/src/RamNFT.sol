@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.20;
 
-import {ERC721URIStorage, ERC721} from "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
+import {ERC721URIStorage, ERC721} from "@openzeppelin/token/ERC721/extensions/ERC721URIStorage.sol";
 
+// £info ERC721. 
+// £question: do ERC721s work on all selected chains?  
 contract RamNFT is ERC721URIStorage {
     error RamNFT__NotOrganiser();
     error RamNFT__NotChoosingRamContract();
 
     // https://medium.com/illumination/16-divine-qualities-of-lord-rama-24c326bd6048
+    // £info: these are the characteristics of ram. 
     struct CharacteristicsOfRam {
         address ram;
         bool isJitaKrodhah;

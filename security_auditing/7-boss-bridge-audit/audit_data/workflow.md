@@ -1,20 +1,15 @@
-# next steps / where am i: 
-- go through contract and build a flow chart. 
-- 
-
-# INFO: Standard Work flow audit
 [ ] Scoping
-  [ ] Read the docs: get a sense of what the protocol does.
-    [x] Are roles defined? 
-    [ ] Any diagrams? Draw my own? -- TO DO. Need more info from contract 
-    [ ] What are invariants that need to hold? Have they been written out?  -- TO DO. Need more info from contract   
-  [x] Read the docs: scope
-    [x] is there a commit hash to focus on? = Nope 
-    [x] see what is in and out of scope. = files in src 
-    [x] Are there known bugs / issues that are out of scope? = none.  
-  [x] Test suite: 
-    [x] what is the test coverage? = not good, but not terrible either. 
-    [x] unit, fuzz, invariant tests? = only unit. 
+  [ ] Read the docs: functionality
+    [ ] Are roles defined? 
+    [ ] Any diagrams? Draw my own?
+    [ ] What are invariants that need to hold? Have they been written out? 
+  [ ] Read the docs: scope
+    [ ] is there a commit hash to focus on? 
+    [ ] see what is in and out of scope. 
+    [ ] Are there known bugs / issues that are out of scope? 
+  [ ] Test suite: 
+    [ ] what is the test coverage?
+    [ ] unit, fuzz, invariant tests?   
   [ ] Run `solidity: metrics` on the SRC folder
     [ ] Make a check list by complexity. (pincho method)
     [ ] Check overview of how methods are called. 
@@ -45,4 +40,3 @@
 [ ] Reporting
   [ ] See layout in this folder. 
   [ ] Don't start doing this too late: note that well written reports also often get a price.  
-

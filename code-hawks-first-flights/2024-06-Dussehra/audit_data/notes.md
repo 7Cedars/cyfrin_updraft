@@ -48,7 +48,7 @@ I really do have to draw myself a diagram :D
 - see long list above. 
 
 # Questions 
-- I am not quite sure how the contract really works yet. What is input user versus organizer  /Dushera contract?
-- Is there on ram or multiple? Answer: multple. everyone that has a ramNFT is ram.  
-- 
+- £question I am not quite sure how the contract really works yet. What is input user versus organizer  /Dushera contract?
+- £question Is there on ram or multiple? Answer: multple. everyone that has a ramNFT is ram.
+- £question Mocks are placed in src folder. this is not best practice... right?  
   
