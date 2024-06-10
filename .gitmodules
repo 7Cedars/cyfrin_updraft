@@ -46,3 +46,9 @@
 [submodule "security_auditing/7-boss-bridge-audit/lib/openzeppelin-contracts"]
 	path = security_auditing/7-boss-bridge-audit/lib/openzeppelin-contracts
 	url = https://github.com/openzeppelin/openzeppelin-contracts
+[submodule "code-hawks-first-flights/2024-06-Dussehra/lib/forge-std"]
+	path = code-hawks-first-flights/2024-06-Dussehra/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "code-hawks-first-flights/2024-06-Dussehra/lib/openzeppelin-contracts"]
+	path = code-hawks-first-flights/2024-06-Dussehra/lib/openzeppelin-contracts
+	url = https://github.com/openzeppelin/openzeppelin-contracts
