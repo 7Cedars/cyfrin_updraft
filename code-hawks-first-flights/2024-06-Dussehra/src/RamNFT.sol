@@ -45,6 +45,10 @@ contract RamNFT is ERC721URIStorage {
         organiser = msg.sender;
     }
 
+    // £audit check on contract missing. ALSO NO TIME/ DATE check! No check whatsoever. You can add any contract you want.  
+    // needs to be in constructor... but isn't. 
+    // btw: this contract can be changed AT ANY TIME!!!! (rug pull possible?) 
+    // £audit-medium/high YEP: choosing ram selects who gets to be Ram, another contract can set this to a fixed contract. 
     function setChoosingRamContract(address _choosingRamContract) public onlyOrganiser {
         choosingRamContract = _choosingRamContract;
     }
@@ -63,6 +67,7 @@ contract RamNFT is ERC721URIStorage {
         });
     }
 
+    // 
     function updateCharacteristics(
         uint256 tokenId,
         bool _isJitaKrodhah,

@@ -50,7 +50,9 @@ contract Dussehra {
         choosingRamContract = ChoosingRam(_choosingRamContract);
     }
 
-    
+    // £notes this function manages people's entree into the protocol. 
+    // £note: they have to pay an entree fee
+    // £note: addresses can only enter once.   
     function enterPeopleWhoLikeRam() public payable {
         // £audit-low: now people have to enter with exact fee. Would possibly be better to say smaller than? 
         if (msg.value != entranceFee) {
@@ -90,7 +92,9 @@ contract Dussehra {
         require(success, "Failed to send money to organiser");
     }
 
-    // £audit access priviledge mix up? OnlyRam allows anyone whith 
+    // £question access priviledge mix up? OnlyRam allows anyone with NFT to withdraw. 
+    // £question: or is this the way it is supposed to work?
+    // 
     function withdraw() public RamIsSelected OnlyRam RavanKilled {
         if (totalAmountGivenToRam == 0) {
             revert Dussehra__AlreadyClaimedAmount();

@@ -48,7 +48,9 @@ contract ChoosingRam {
             revert ChoosingRam__CallerIsNotChallenger();
         }
 
-        // £info: is with timestamp, gaming timestamp and how they work on different chains.  
+        // £info: is with timestamp, gaming timestamp and how they work on different chains. 
+        // £audit-medium: RamIsNotSelected and this if function are mutually exclusive. 
+        // Meaning that this function can NEVER be called.    
         if (block.timestamp > 1728691200) {
             revert ChoosingRam__TimeToBeLikeRamFinish();
         }
@@ -73,6 +75,7 @@ contract ChoosingRam {
                 ramNFT.updateCharacteristics(tokenIdOfChallenger, true, true, true, true, false);
             } else if (ramNFT.getCharacteristics(tokenIdOfChallenger).isSatyavaakyah == false){
                 ramNFT.updateCharacteristics(tokenIdOfChallenger, true, true, true, true, true);
+                // £question. WHAT?! is selectedRam set here as well?! 
                 selectedRam = ramNFT.getCharacteristics(tokenIdOfChallenger).ram;
             }
         } else {
@@ -86,12 +89,19 @@ contract ChoosingRam {
                 ramNFT.updateCharacteristics(tokenIdOfAnyPerticipent, true, true, true, true, false);
             } else if (ramNFT.getCharacteristics(tokenIdOfAnyPerticipent).isSatyavaakyah == false){
                 ramNFT.updateCharacteristics(tokenIdOfAnyPerticipent, true, true, true, true, true);
+                // £question. WHAT?! is selectedRam set here as well?! 
+                // £question: it does NOT set isRamSelected = true; How does this impact protocol? 
+                // £ one way is that it allows for front runnign: setting selectedRam AFTER selectRamIfNotSelected has been called. 
+                // £note: this also applies to the bit above.   
                 selectedRam = ramNFT.getCharacteristics(tokenIdOfAnyPerticipent).ram;
             }
         }
     }
 
-    // £info: this function selects a ram  
+    // £info: this function selects a ram supposedly randomly.
+    // £audit: note that date is a mgic number! 
+    // £question: do all these number actually align?! (prob not...)  
+    // £question how much time is there to call this function? CHECK!  
     function selectRamIfNotSelected() public RamIsNotSelected OnlyOrganiser {
         if (block.timestamp < 1728691200) {
             revert ChoosingRam__TimeToBeLikeRamIsNotFinish();
@@ -101,6 +111,7 @@ contract ChoosingRam {
         }
         // £audi high: again, this is not random. 
         uint256 random = uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrandao))) % ramNFT.tokenCounter();
+        // £audit-info do not need two separate state variables for this.
         selectedRam = ramNFT.getCharacteristics(random).ram;
         isRamSelected = true;
     }

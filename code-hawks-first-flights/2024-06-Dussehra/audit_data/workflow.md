@@ -4,10 +4,10 @@
 
 # INFO: Standard Work flow audit
 [ ] Scoping
-  [ ] Read the docs: get a sense of what the protocol does.
+  [x] Read the docs: get a sense of what the protocol does.
     [x] Are roles defined? 
-    [ ] Any diagrams? Draw my own? -- TO DO. Need more info from contract 
-    [ ] What are invariants that need to hold? Have they been written out?  -- TO DO. Need more info from contract   
+    [x] Any diagrams? Draw my own? 
+    [x] What are invariants that need to hold? Have they been written out?  -- Not that relevant here? there are enough bugs without invariant testing... 
   [x] Read the docs: scope
     [x] is there a commit hash to focus on? = Nope 
     [x] see what is in and out of scope. = files in src 
@@ -15,12 +15,12 @@
   [x] Test suite: 
     [x] what is the test coverage? = not good, but not terrible either. 
     [x] unit, fuzz, invariant tests? = only unit. 
-  [ ] Run `solidity: metrics` on the SRC folder
-    [ ] Make a check list by complexity. (pincho method)
-    [ ] Check overview of how methods are called. 
-    [ ] Create sequence of how to review contracts. Where to start, how to continue. Probably simple to complex contracts. 
+  [x] Run `solidity: metrics` on the SRC folder
+    [x] Make a check list by complexity. (pincho method)
+    [x] Check overview of how methods are called. 
+    [x] Create sequence of how to review contracts. Where to start, how to continue. Probably simple to complex contracts. 
 [ ] Reconnaissance
-  [ ] Create an `audit` branch to work in.  
+  [x] Create an `audit` branch to work in.  
   [ ] Run `slither .` and `aderyn .` on the code base. Make notes in the code of where issues were flagged.
   [ ] Go through code in sequence decided earlier. 
   [ ] Make notes, ask questions... get to know the code. 

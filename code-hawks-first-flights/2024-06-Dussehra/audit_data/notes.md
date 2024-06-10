@@ -41,8 +41,10 @@ Three contracts:
 # notes
 Hardly any tests. No fuzz tests, no invariant tests. 
 
-# Diagrams
-I really do have to draw myself a diagram :D 
+# Sequence
+1. RamNFT.sol
+2. Dussehra.sol
+3. ChoosingRam.sol
 
 # Potential Attack Vectors 
 - see long list above. 
@@ -51,4 +53,7 @@ I really do have to draw myself a diagram :D
 - £question I am not quite sure how the contract really works yet. What is input user versus organizer  /Dushera contract?
 - £question Is there on ram or multiple? Answer: multple. everyone that has a ramNFT is ram.
 - £question Mocks are placed in src folder. this is not best practice... right?  
+- £when are onlyOrganiser and onlyChoosingRamContract called / used? 
+- £setChoosingRamContract: does it have a check on what kind of contract is added? Don't think so.. 
+-  
   
