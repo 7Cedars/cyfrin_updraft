@@ -743,7 +743,8 @@ Place the following in `Dussehra.t.sol`.
 
 ### [L-3] Modifiers that are used only once can be integrated in the function. 
 
-**Description:** 
+**Description:** Found in several locations: 
+
 - Found in src/ChoosingRam.sol 
 
 	```javascript
@@ -881,9 +882,10 @@ Where <ADDR> is the address state variable and where  <CONTRACT_NAME> is the con
 
 Change all require statements following the same logic. 
 
-### [L-8] Any time a function changes a state variable, an event should be emitted. Many of these events are missing throughout the protocol. 
+### [L-7] Any time a function changes a state variable, an event should be emitted. Many of these events are missing throughout the protocol. 
 
-**Description:** 
+**Description:** Found in several locations: 
+
 - Found in src/ChoosingRam.sol 
 
 	```javascript
@@ -935,11 +937,12 @@ Change all require statements following the same logic.
 
 **Recommended Mitigation:** Add the missing events. 
 
-### [L-9] Avoid use of magic numbers: Define and use `constant` variables instead of using literals. 
+### [L-8] Avoid use of magic numbers: Define and use `constant` variables instead of using literals. 
 
 **Description:** Using `constant` variables instead of literals increases readability of code and decreases chances of inadvertently introducing errors. 
 
 - Found in src/ChoosingRam.sol 
+  
     ```javascript
 	    if (block.timestamp > 1728691200) {
             revert ChoosingRam__TimeToBeLikeRamFinish();
@@ -988,7 +991,7 @@ Change all require statements following the same logic.
 
 Apply the same logic to the other literal values. 
 
-### [L-10] The `ChoosingRam::increaseValuesOfParticipants` uses a very convoluted, gas inefficient approach to upgrading characteristics of ramNFTs. 
+### [L-9] The `ChoosingRam::increaseValuesOfParticipants` uses a very convoluted, gas inefficient approach to upgrading characteristics of ramNFTs. 
 
 **Description:** The `ChoosingRam::increaseValuesOfParticipants` uses a very convoluted, gas inefficient approach to upgrading characteristics of ramNFTs. 
 ```javascript
@@ -1023,7 +1026,7 @@ Apply the same logic to the other literal values.
 
 **Recommended Mitigation:** As the characteristics are ordinal (they add up) it is much more efficient to use an enum in its stead. As this is a low risk finding, I will suffice with leaving a link to solidity-by-example on enums: https://solidity-by-example.org/enum/. 
 
-### [L-11] The `RamNFT` is a ERC721 token, but does not use any functionality of an ERC token.
+### [L-10] The `RamNFT` is a ERC721 token, but does not use any functionality of an ERC token.
 
 **Description:** The `RamNFT` is a ERC721 token, but does not use any functionality of an ERC token. Notably: 
 1. The NFT is not linked to a uri: as such, it is not linked to an off-chain image or asset.   
@@ -1034,7 +1037,7 @@ Apply the same logic to the other literal values.
 
 **Recommended Mitigation:** Either integrate ERC721 functionality into the protocol or remove the ERC721 imports.  
 
-### [L-12] Any state variable that is only set at construction time and not changed afterwards, should be set to immutable.  
+### [L-11] Any state variable that is only set at construction time and not changed afterwards, should be set to immutable.  
 
 **Description:** 
 
@@ -1061,7 +1064,7 @@ Apply the same logic to the other literal values.
 
 **Recommended Mitigation:** Change these state variables to immutable. 
 
-### [L-13] Literal boolean comparisons are unnecessary.     
+### [L-12] Literal boolean comparisons are unnecessary.     
 
 **Description:** 
 
@@ -1107,7 +1110,7 @@ Apply the same logic to the other literal values.
 +        if (!ramNFT.getCharacteristics(tokenIdOfChallenger).isJitaKrodhah)
 ```
 
-### [L-14] The function `Dussehra::enterPeopleWhoLikeRam` tracks the number addresses of participants by pushing them into an array. This is costs a lot of gas, it is better to use a counter instead.       
+### [L-13] The function `Dussehra::enterPeopleWhoLikeRam` tracks the number addresses of participants by pushing them into an array. This is costs a lot of gas, it is better to use a counter instead.       
 
 **Description:** The function `Dussehra::enterPeopleWhoLikeRam` tracks the number addresses of participants by pushing them into an array. This is costs a lot of gas. It is better to use a counter instead.  
 
@@ -1129,7 +1132,7 @@ Apply the same logic to the other literal values.
 +   uint256 totalAmountByThePeople = WantToBeLikeRam * entranceFee;
 ```
 
-### [L-15] It is a waste of gas to add additional getter functions for public state variables, because they are given getter functions automatically.  
+### [L-14] It is a waste of gas to add additional getter functions for public state variables, because they are given getter functions automatically.  
 
 **Description:**
 - Found in src/RamNFT.sol 
@@ -1149,7 +1152,7 @@ Apply the same logic to the other literal values.
 
 **Recommended Mitigation:** Remove these getter functions. 
 
-### [L-16] Remove unused state variables. 
+### [L-15] Remove unused state variables. 
 
 **Description:** 
 - Found in src/Dussehra.sol 
