@@ -84,3 +84,7 @@ Hardly any tests. No fuzz tests, no invariant tests.
 
   Note difference between earliest moment that Ram can be selected in killRavana = 24 hours. 
   Note difference between latest moment that Ram can be selected in killRavana = 69 seconds. 
+
+  About having two different organisers... 
+  -- the Dussehra contract will send funds to whoever initiated the contract. 
+  -- 

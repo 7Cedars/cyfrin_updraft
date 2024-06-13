@@ -5,7 +5,7 @@ import {RamNFT} from "./RamNFT.sol";
 
 contract ChoosingRam {
     // £checked: how many events need to be added? 
-    // £audit-low/info again: include (indexed) vars in errors and events.   
+    // £skipped: include (indexed) vars in errors and events.   
     error ChoosingRam__InvalidTokenIdOfChallenger();
     error ChoosingRam__InvalidTokenIdOfPerticipent();
     error ChoosingRam__TimeToBeLikeRamFinish();
@@ -18,27 +18,28 @@ contract ChoosingRam {
 
     address public selectedRam; // needs to be public 
 
-    // seems ok... 
+    // £report-written: this require can be revised to if statement with function return = more gas efficient.  
     modifier RamIsNotSelected() {
         require(!isRamSelected, "Ram is selected!");
         _;
     }
 
-    // £audit low: modifier only used once. Integrate into function. 
+    // £report-written: modifier only used once. Integrate into function. 
     modifier OnlyOrganiser() {
-        require(ramNFT.organiser() == msg.sender, "Only organiser can call this function!");
+        require(ramNFT.organiser() == msg.sender, "Only organiser can call this function!"); 
         _;
     }
 
     constructor(address _ramNFT) {
-        // £audit-gas - no need to initialise state vars to false.  
+        // £report-written - no need to initialise state vars to false.  
         isRamSelected = false; 
-        // £audit-high/medium? No address(0) check.. or ANYTHING else. it is not event set as ERC721. This can be literally any kind of contract. 
-        ramNFT = RamNFT(_ramNFT);  
+        // £report-written-low? No address(0) check.. or ANYTHING else - NOT true. it loads as RamNFT.. 
+        ramNFT = RamNFT(_ramNFT); 
     }
       
     // £notice: this function raises value of either tokenIdOfChallenger OR tokenIdOfAnyPerticipent.
-    // £audit-info: this functionality of the contract does not have any influence over broader protocol. It is useless. 
+    // £logged: this functionality of the contract does not have any influence over broader protocol. It is useless. 
+    // 
     function increaseValuesOfParticipants(uint256 tokenIdOfChallenger, uint256 tokenIdOfAnyPerticipent)
         public
         RamIsNotSelected
@@ -53,20 +54,22 @@ contract ChoosingRam {
             revert ChoosingRam__CallerIsNotChallenger();
         }
 
-        // £info: is with timestamp, gaming timestamp and how they work on different chains. 
-        // £audit-medium: RamIsNotSelected and this if function are mutually exclusive. -- medium because function has no impact on broader protocol. 
-        // Meaning that this function can NEVER be called.    
+        // £checked: is with timestamp, gaming timestamp and how they work on different chains. 
+        // £skipped: RamIsNotSelected and this if function are mutually exclusive. -- medium because function has no impact on broader protocol. 
+        // skipped because not true: this function CAN be called. 
+        // Meaning that this function can NEVER be called.
+        // £logged on Arbitrum timestamp can 24 hours off. right?  
         if (block.timestamp > 1728691200) {
             revert ChoosingRam__TimeToBeLikeRamFinish();
         }
         
-        // £audit-high: this is not random. 
+        // ££report-written: this is not random. 
         uint256 random =
-            uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrandao, msg.sender))) % 2; // £note / audit low?: this should be 1? now chance is not 50 / 50?   
+            uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrandao, msg.sender))) % 2; // £note / £audit low?: this should be 1? now chance is not 50 / 50?   
 
-        // audit-gas: this should be a mapping (or enum -> just add value of 1 each time: as the increase in power is ordinal). -- or: mapping! See elsewhere: change function accordingly. 
-        // £audit?: slither: Reentrancy in ChoosingRam.increaseValuesOfParticipants(uint256,uint256) (src/ChoosingRam.sol#37-99): 
-        // £audit?: is this really an issue here? Would be interesting to try and exploit it. 
+        // £logged: this should be a mapping (or enum -> just add value of 1 each time: as the increase in power is ordinal). -- or: mapping! See elsewhere: change function accordingly. 
+        // £skipped?: slither: Reentrancy in ChoosingRam.increaseValuesOfParticipants(uint256,uint256) (src/ChoosingRam.sol#37-99): 
+        // £skipped?: is this really an issue here? Would be interesting to try and exploit it. 
         // £ it might be possible to re-enter and in one go upgrade all the way. -- maybe mention in passing? // when proposed remedy? 
         if (random == 0) {
             if (ramNFT.getCharacteristics(tokenIdOfChallenger).isJitaKrodhah == false){
@@ -80,7 +83,9 @@ contract ChoosingRam {
             } else if (ramNFT.getCharacteristics(tokenIdOfChallenger).isSatyavaakyah == false){
                 ramNFT.updateCharacteristics(tokenIdOfChallenger, true, true, true, true, true);
                 // £checked WHAT?! is selectedRam set here as well?! YEP  
-                // £audit-high: it allows for selectedRam to be set AFTER selectRamIfNotSelected has been called. 
+                // £skip: it allows for selectedRam to be set AFTER selectRamIfNotSelected has been called. 
+                // No, because of the RamIsNotSelected modifier this is not possible. 
+                // £question: than how can it matter... 
                 selectedRam = ramNFT.getCharacteristics(tokenIdOfChallenger).ram;
             }
         } else {
@@ -95,30 +100,33 @@ contract ChoosingRam {
             } else if (ramNFT.getCharacteristics(tokenIdOfAnyPerticipent).isSatyavaakyah == false){
                 ramNFT.updateCharacteristics(tokenIdOfAnyPerticipent, true, true, true, true, true);
                 // checked. WHAT?! is selectedRam set here as well?! YEP 
-                // £audit-high: it allows for selectedRam to be set AFTER selectRamIfNotSelected has been called.   
+                // £skip: it allows for selectedRam to be set AFTER selectRamIfNotSelected has been called.
+                // No, because of the RamIsNotSelected modifier this is not possible. 
                 selectedRam = ramNFT.getCharacteristics(tokenIdOfAnyPerticipent).ram;
             }
         }
     }
 
     // £info: this function selects a ram supposedly randomly.
-    // £audit: note that date is a magic number! 
-    // £audit-low: if organiser waits till the last minute to select ram, there is only 69 seconds left to call killRavana. 
+    // £logged: note that date is a magic number! 
+    // £logged: if organiser waits till the last minute to select ram, there is only 69 seconds left to call killRavana. 
     // £ (max is 24 hours) -- see notes.md 
     // £checked how much time is there to call this function? CHECK! 
     function selectRamIfNotSelected() public RamIsNotSelected OnlyOrganiser {
         if (block.timestamp < 1728691200) {
             revert ChoosingRam__TimeToBeLikeRamIsNotFinish();
         }
-        // £audit (centralisation?) if organiser does not pick before certain time, participants will not be able to claim reward. 
+        // £logged (centralisation?) if organiser does not pick before certain time, participants will not be able to claim reward. 
         if (block.timestamp > 1728777600) {
             revert ChoosingRam__EventIsFinished();
         }
-        // £audi high: again, this is not random. 
+        // £report-written: again, this is not random. 
         uint256 random = uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrandao))) % ramNFT.tokenCounter();
-        // £audit-gas/low do not need two separate state variables for this.
+        //: £logged-H-6 do not need two separate state variables for this. -- allows for resetting selectedRam
         selectedRam = ramNFT.getCharacteristics(random).ram;
-        // £audit-info: needs to emit event
+        // £logged: needs to emit event
         isRamSelected = true;
     }
+
+    
 }

@@ -1,5 +1,6 @@
-# next steps / where am i: 
-- 
+# next steps / where am I: 
+- go through audit items. 
+- continue at: £audit-high WORKING ON THIS NOW: 
 
 # INFO: Standard Work flow audit
 [x] Scoping
@@ -26,7 +27,8 @@
   [x] Make notes, ask questions... get to know the code. 
 
 [ ] Vulnerability identification: 
-  [ ] First pass: Get the attacker mentality started: how to break what I see? 
+  [x] First pass: Get the attacker mentality started: how to break what I see? 
+    [x] go through questions I created at scoping phase as I do so.  
   [ ] When I think I found one: build PoC and check.
     [ ] If indeed vulnerability, create report item: only title and ref to PoC. (I might find related issues, might get more insight etc.) 
   [ ] The basic things to look out for:

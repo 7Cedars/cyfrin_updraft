@@ -19,15 +19,12 @@ Extensive layout:
 
 ### [S-#] TITLE (Root Cause + Impact)
 
-**Description:** Explanation here. 
-<details>
-<summary> Proof of Concept</summary>
+**Description:** Explanation here. And add the relevant code: 
 
-Place the following in `FUNC HERE`
 ```javascript
   `CODE HERE`
 ```
-</details>
+
 
 **Impact:** Describe impact clearly, legitimate impact score. 
 
@@ -38,7 +35,7 @@ Place the following in `FUNC HERE`
 <details>
 <summary> Proof of Concept</summary>
 
-Place the following in `FUNC HERE`
+Place the following in `SCRIPT NAME HERE`
 ```javascript
   `CODE HERE`
 ```

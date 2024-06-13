@@ -360,7 +360,7 @@ Instead of marking a function as `public`, consider marking it as `external` if 
 
 ### [I-2]: Avoid use of magic numbers: Define and use `constant` variables instead of using literals. 
 
-Using `constant` variable increases readability of code and decreases chances of inadvertantly introducing errors. 
+Using `constant` variable increases readability of code and decreases chances of inadvertently introducing errors. 
 
 If the same constant literal value is used multiple times, create a constant state variable and reference it throughout the contract.
 
