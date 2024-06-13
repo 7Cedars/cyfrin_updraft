@@ -29,7 +29,7 @@
 This is a repository of  courses that I followed at Cyfrin Updraft and Codehawks' first flights training competitive audits. It currently consists of three folders
 - code_hawks_first_flights:  
 - security_auditing: 
--  
+- security_audit_reports: 
 
 
 ## On previous trainings followed 
