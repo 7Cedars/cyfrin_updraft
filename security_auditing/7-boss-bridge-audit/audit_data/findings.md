@@ -214,15 +214,35 @@ Place the following in `L1TokenBridge.t.sol`
 
 ### [H-4] The `L1BossBridge::sendToL1` function does not check the values extracted from `message` before using them to send eth to recipient address by placing a low level `.call`. This allows a malicious user to sent large amounts of eth to their own address, or create a DoS by executing a function with immense gas cost.  
 
-**Description:** 
-TO DO - CONTINUE HERE (First flight just launched.. will finish this report when done with that one.)
+**Description:** As mentioned above, the `sendToL1` function is meant to allow a central signer to approve and execute retrievals of L1 tokens following the deposit of L2 tokens. To do this, it takes the `v`, `r` and `s` values as signature of the `L1BossBridge` signer, and a `message` field that contains the abi.encoded function call to transfer L1 tokens to the user. 
 
-**Impact:** 
+The function itself encodes the message using the  `v`, `r` and `s` values and subsequently retrieves the address from the encrypted message. This all happens within one line: 
+```javascript
+    address signer = ECDSA.recover(MessageHashUtils.toEthSignedMessageHash(keccak256(message)), v, r, s);
+```
 
-**Proof of Concept:**
+However, because the message and signature are sent in separate files, it is possible to change the `message` value to anything. 
 
-**Recommended Mitigation:** 
+**Impact:** In combination with front running the transaction, it allows a malicious user to send any value to their own address.
 
+**Recommended Mitigation:** Send the signature as a signed message. This will mage it impossible to change the content of the message, as it will alter the address that is retrieved. 
+
+```diff
++ 
+        // note: `signature` should be the result of hashing the message and v, r, s through an external function. 
++       function sendToL1(bytes32 signature, bytes memory message) public nonReentrant whenNotPaused {
+-       function sendToL1(uint8 v, bytes32 r, bytes32 s, bytes memory message) public nonReentrant whenNotPaused {
+        bytes memory signature = abi.encodePacked(r, s, v); 
+-       address signer = ECDSA.recover(MessageHashUtils.toEthSignedMessageHash(keccak256(message)), v, r, s);
++       bytes32 digest = MessageHashUtils.toEthSignedMessageHash(keccak256(message)); 
++       address signer = digest.recover(signature);
+
+        if (!signers[signer]) {
+            revert L1BossBridge__Unauthorized();
+        }
+
+        (address target, uint256 value, bytes memory data) = abi.decode(message, (address, uint256, bytes));
+```
 
 
 ## Medium

