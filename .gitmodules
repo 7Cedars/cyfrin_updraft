@@ -52,3 +52,18 @@
 [submodule "code-hawks-first-flights/2024-06-Dussehra/lib/openzeppelin-contracts"]
 	path = code-hawks-first-flights/2024-06-Dussehra/lib/openzeppelin-contracts
 	url = https://github.com/openzeppelin/openzeppelin-contracts
+[submodule "foundry_full_course_cu/minimal-account-abstraction/lib/forge-std"]
+	path = foundry_full_course_cu/minimal-account-abstraction/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "foundry_full_course_cu/minimal-account-abstraction/lib/openzeppelin-contracts"]
+	path = foundry_full_course_cu/minimal-account-abstraction/lib/openzeppelin-contracts
+	url = https://github.com/openzeppelin/openzeppelin-contracts
+[submodule "foundry_full_course_cu/minimal-account-abstraction/lib/account-abstraction"]
+	path = foundry_full_course_cu/minimal-account-abstraction/lib/account-abstraction
+	url = https://github.com/eth-infinitism/account-abstraction
+[submodule "foundry_full_course_cu/minimal-account-abstraction/lib/foundry-era-contracts"]
+	path = foundry_full_course_cu/minimal-account-abstraction/lib/foundry-era-contracts
+	url = https://github.com/cyfrin/foundry-era-contracts
+[submodule "foundry_full_course_cu/minimal-account-abstraction/lib/foundry-devops"]
+	path = foundry_full_course_cu/minimal-account-abstraction/lib/foundry-devops
+	url = https://github.com/cyfrin/foundry-devops
