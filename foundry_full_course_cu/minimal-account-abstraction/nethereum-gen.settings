@@ -1,0 +1,7 @@
+{
+    "projectName": "MinimalAccountAbstraction",
+    "namespace": "MinimalAccountAbstraction.Contracts",
+    "lang": 0,
+    "autoCodeGen": true,
+    "projectPath": "../"
+}
