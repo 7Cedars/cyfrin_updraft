@@ -2,7 +2,7 @@
 // Following along with class @https://updraft.cyfrin.io/courses/advanced-foundry/account-abstraction
 pragma solidity 0.8.24; 
 
-import {Script} from "@forge-std/Script.sol";
+import {Script} from "forge-std/Script.sol";
 import {PackedUserOperation} from "lib/account-abstraction/contracts/interfaces/PackedUserOperation.sol";
 import {MyHelperConfig} from "script/MyHelperConfig.s.sol";
 import {IEntryPoint} from "lib/account-abstraction/contracts/interfaces/IEntryPoint.sol";
