@@ -11,14 +11,18 @@ import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/Messa
 contract MySendPackedUserOp is Script {
   using MessageHashUtils for bytes32;
 
-  function run() public {}
+  function run() public {
+    // to actuall deploy and run, this has to be completed. 
+    // for if/when I want to do this, see: https://updraft.cyfrin.io/courses/advanced-foundry/account-abstraction/live-demo-eth?lesson_format=video
+  }
 
   function generateSignedUserOperation (
     bytes memory callData,
-    MyHelperConfig.NetworkConfig memory config
+    MyHelperConfig.NetworkConfig memory config,
+    address myMinimalAccount
     ) public view returns (PackedUserOperation memory) {
-    uint256 nonce = vm.getNonce(config.account);
-    PackedUserOperation memory userOp = _generateuserOperation(callData, config.account, nonce);
+    uint256 nonce = vm.getNonce(myMinimalAccount) - 1;
+    PackedUserOperation memory userOp = _generateuserOperation(callData, myMinimalAccount, nonce);
 
     // getUserOphash
     bytes32 userOpHash = IEntryPoint(config.entryPoint).getUserOpHash(userOp);

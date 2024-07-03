@@ -67,7 +67,9 @@ contract MyMinimalAccountTest is Test {
     uint256 value = 0;
     bytes memory functionData = abi.encodeWithSelector(ERC20Mock.mint.selector, address(myMinimalAccount), AMOUNT);
     bytes memory executeCallData = abi.encodeWithSelector(MyMinimalAccount.execute.selector, dest, value, functionData);
-    PackedUserOperation memory packedUserOp = sendPackedUserOp.generateSignedUserOperation(executeCallData, myHelperConfig.getConfig());
+    PackedUserOperation memory packedUserOp = sendPackedUserOp.generateSignedUserOperation(
+      executeCallData, myHelperConfig.getConfig(), address(myMinimalAccount)
+      );
     bytes32 userOperationHash = IEntryPoint(myHelperConfig.getConfig().entryPoint).getUserOpHash(packedUserOp);
 
     // act
@@ -84,7 +86,9 @@ contract MyMinimalAccountTest is Test {
     uint256 value = 0;
     bytes memory functionData = abi.encodeWithSelector(ERC20Mock.mint.selector, address(myMinimalAccount), AMOUNT);
     bytes memory executeCallData = abi.encodeWithSelector(MyMinimalAccount.execute.selector, dest, value, functionData);
-    PackedUserOperation memory packedUserOp = sendPackedUserOp.generateSignedUserOperation(executeCallData, myHelperConfig.getConfig());
+    PackedUserOperation memory packedUserOp = sendPackedUserOp.generateSignedUserOperation(
+      executeCallData, myHelperConfig.getConfig(), address(myMinimalAccount)
+      );
     bytes32 userOperationHash = IEntryPoint(myHelperConfig.getConfig().entryPoint).getUserOpHash(packedUserOp);
     uint256 missingAccountFunds = 1e18; 
 
@@ -103,7 +107,9 @@ contract MyMinimalAccountTest is Test {
     uint256 value = 0;
     bytes memory functionData = abi.encodeWithSelector(ERC20Mock.mint.selector, address(myMinimalAccount), AMOUNT);
     bytes memory executeCallData = abi.encodeWithSelector(MyMinimalAccount.execute.selector, dest, value, functionData);
-    PackedUserOperation memory packedUserOp = sendPackedUserOp.generateSignedUserOperation(executeCallData, myHelperConfig.getConfig());
+    PackedUserOperation memory packedUserOp = sendPackedUserOp.generateSignedUserOperation(
+      executeCallData, myHelperConfig.getConfig(), address(myMinimalAccount)
+      );
     // bytes32 userOperationHash = IEntryPoint(myHelperConfig.getConfig().entryPoint).getUserOpHash(packedUserOp);
     uint256 missingAccountFunds = 1e18; 
 
