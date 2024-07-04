@@ -67,3 +67,21 @@
 [submodule "foundry_full_course_cu/minimal-account-abstraction/lib/foundry-devops"]
 	path = foundry_full_course_cu/minimal-account-abstraction/lib/foundry-devops
 	url = https://github.com/cyfrin/foundry-devops
+[submodule "code_hawks_first_flights/2024-07-Mondrian-Wallet_v2/lib/forge-std"]
+	path = code_hawks_first_flights/2024-07-Mondrian-Wallet_v2/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "code_hawks_first_flights/2024-07-Mondrian-Wallet_v2/lib/openzeppelin-contracts"]
+	path = code_hawks_first_flights/2024-07-Mondrian-Wallet_v2/lib/openzeppelin-contracts
+	url = https://github.com/openzeppelin/openzeppelin-contracts
+[submodule "code_hawks_first_flights/2024-07-Mondrian-Wallet_v2/lib/account-abstraction"]
+	path = code_hawks_first_flights/2024-07-Mondrian-Wallet_v2/lib/account-abstraction
+	url = https://github.com/eth-infinitism/account-abstraction
+[submodule "code_hawks_first_flights/2024-07-Mondrian-Wallet_v2/lib/foundry-era-contracts"]
+	path = code_hawks_first_flights/2024-07-Mondrian-Wallet_v2/lib/foundry-era-contracts
+	url = https://github.com/cyfrin/foundry-era-contracts
+[submodule "code_hawks_first_flights/2024-07-Mondrian-Wallet_v2/lib/foundry-devops"]
+	path = code_hawks_first_flights/2024-07-Mondrian-Wallet_v2/lib/foundry-devops
+	url = https://github.com/cyfrin/foundry-devops
+[submodule "code_hawks_first_flights/2024-07-Mondrian-Wallet_v2/lib/openzeppelin-contracts-upgradeable"]
+	path = code_hawks_first_flights/2024-07-Mondrian-Wallet_v2/lib/openzeppelin-contracts-upgradeable
+	url = https://github.com/openzeppelin/openzeppelin-contracts-upgradeable
