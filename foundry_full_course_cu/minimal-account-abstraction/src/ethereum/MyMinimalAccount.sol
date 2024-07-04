@@ -77,7 +77,7 @@ contract MyMinimalAccount is IAccount, Ownable {
         uint256 missingAccountFunds
   ) external requireFromEntryPoint returns (uint256 validationData) {
 
-    uint256 validationData = _validateSignature(userOp, userOpHash); 
+    validationData = _validateSignature(userOp, userOpHash); 
     // _validateNonce(); -- optional. 
 
     _payPrefund(missingAccountFunds); 
