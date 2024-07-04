@@ -4,7 +4,7 @@ pragma solidity 0.8.24;
 // zkSync Era Imports
 import {
     IAccount,
-    ACCOUNT_VALIDATION_SUCCESS_MAGIC
+    ACCOUNT_VALIDATION_SUCCESS_MAGIC // £note: this is correct I think. 
 } from "lib/foundry-era-contracts/src/system-contracts/contracts/interfaces/IAccount.sol";
 import {
     Transaction,
@@ -13,9 +13,9 @@ import {
 import {SystemContractsCaller} from
     "lib/foundry-era-contracts/src/system-contracts/contracts/libraries/SystemContractsCaller.sol";
 import {
-    NONCE_HOLDER_SYSTEM_CONTRACT,
-    BOOTLOADER_FORMAL_ADDRESS,
-    DEPLOYER_SYSTEM_CONTRACT
+    NONCE_HOLDER_SYSTEM_CONTRACT, // £question is this the correct address? check 
+    BOOTLOADER_FORMAL_ADDRESS, // £question is this the correct address? check 
+    DEPLOYER_SYSTEM_CONTRACT // £question I think this is the correct address. But still: check.  
 } from "lib/foundry-era-contracts/src/system-contracts/contracts/Constants.sol";
 import {INonceHolder} from "lib/foundry-era-contracts/src/system-contracts/contracts/interfaces/INonceHolder.sol";
 import {Utils} from "lib/foundry-era-contracts/src/system-contracts/contracts/libraries/Utils.sol";
@@ -93,6 +93,7 @@ contract MondrianWallet2 is IAccount, Initializable, OwnableUpgradeable, UUPSUpg
         _executeTransaction(_transaction);
     }
 
+    // £audit-high Here there is a check missing. Validate will always pass. High-risk. 
     function executeTransactionFromOutside(Transaction memory _transaction) external payable {
         _validateTransaction(_transaction);
         _executeTransaction(_transaction);
@@ -155,6 +156,7 @@ contract MondrianWallet2 is IAccount, Initializable, OwnableUpgradeable, UUPSUpg
             uint32 gas = Utils.safeCastToU32(gasleft());
             SystemContractsCaller.systemCallWithPropagatedRevert(gas, to, value, data);
         } else {
+            // £audit: sequence is wrong. check at end reentrancy? 
             bool success;
             (success,) = to.call{value: value}(data);
             if (!success) {

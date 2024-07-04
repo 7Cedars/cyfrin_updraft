@@ -1,6 +1,6 @@
 # next steps / where am I: 
 - go through audit items. 
-- continue at:
+- continue at: -- Read the docs -- 
 
 # INFO: Standard Work flow audit
 [ ] Scoping
@@ -9,12 +9,12 @@
     [ ] Any diagrams? Draw my own? 
     [ ] What are invariants that need to hold? Have they been written out? 
   [ ] Read the docs: scope
-    [ ] is there a commit hash to focus on? = Nope 
-    [ ] see what is in and out of scope. = files in src 
-    [ ] Are there known bugs / issues that are out of scope? = none.  
+    [ ] is there a commit hash to focus on? 
+    [ ] see what is in and out of scope. 
+    [ ] Are there known bugs / issues that are out of scope?  
   [ ] Test suite: 
-    [ ] what is the test coverage? = not good, but not terrible either. 
-    [ ] unit, fuzz, invariant tests? = only unit. 
+    [ ] what is the test coverage? 
+    [ ] unit, fuzz, invariant tests? 
   [ ] Run `solidity: metrics` on the SRC folder
     [ ] Make a check list by complexity. (pincho method)
     [ ] Check overview of how methods are called. 
