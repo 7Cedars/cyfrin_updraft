@@ -4,6 +4,9 @@
 
 # INFO: Standard Work flow audit
 [ ] Scoping
+  [ ] Create an `audit` branch to work in.
+    [ ] Copy files from previous audit 
+    [ ] Clean up files.  
   [x] Read the docs: get a sense of what the protocol does.
     [x] Are roles defined? 
     [x] Any diagrams? Draw my own? - none. But also does not make a whole lot of sense. Or does it? 
@@ -14,17 +17,16 @@
     [x] Are there known bugs / issues that are out of scope? = see readme: only two system contracts it is supposed to work with. 
       - The wallet may not work as intended with zksync system contracts. The only system contract that it is expected to work correctly with is the `DEPLOYER_CONTRACT` and the `NONCE_HOLDER_SYSTEM_CONTRACT`.
       - We are using the `cyfrin/foundry-era-contracts` package, which is not what the zkSync documentation recommends. Please ignore. 
-  [ ] Test suite: NB: zksync tests! -- see module I just completed... 
-    [ ] what is the test coverage? 
-    [ ] unit, fuzz, invariant tests? 
-  [ ] Run `solidity: metrics` on the SRC folder
-    [ ] Make a check list by complexity. (pincho method)
-    [ ] Check overview of how methods are called. 
-    [ ] Create sequence of how to review contracts. Where to start, how to continue. Probably simple to complex contracts. 
+  [x] Test suite: NB: zksync tests! -- see module I just completed... 
+    [x] what is the test coverage? -- unknown. (coverage does not work). But does not seem too good :D 
+    [x] unit, fuzz, invariant tests? - only unit. 
+  [x] Run `solidity: metrics` on the SRC folder
+    [x] Make a check list by complexity. (pincho method) = only one contract :D  
+    [x] Check overview of how methods are called. 
+    [x] Create sequence of how to review contracts. Where to start, how to continue. Probably simple to complex contracts. 
 [ ] Reconnaissance
-  [ ] Create an `audit` branch to work in.  
-  [ ] Run `slither .` on the code base. Make notes in the code of where issues were flagged.
-  [ ] Run `aderyn .` on the code base. Make notes in the code of where issues were flagged.
+  [x] Run `slither .` on the code base. Make notes in the code of where issues were flagged.
+  [x] Run `aderyn .` on the code base. Make notes in the code of where issues were flagged.
   [ ] Go through code in sequence decided earlier. 
   [ ] Make notes, ask questions... get to know the code. 
 

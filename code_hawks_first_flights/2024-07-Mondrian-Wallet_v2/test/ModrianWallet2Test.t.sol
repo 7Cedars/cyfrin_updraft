@@ -32,7 +32,7 @@ contract MondrianWallet2Test is Test, ZkSyncChainChecker {
     MondrianWallet2 mondrianWallet;
     ERC20Mock usdc;
     bytes4 constant EIP1271_SUCCESS_RETURN_VALUE = 0x1626ba7e;
-    _CheatCodes cheatCodes = _CheatCodes(VM_ADDRESS);
+    // _CheatCodes cheatCodes = _CheatCodes(VM_ADDRESS);
 
     uint256 constant AMOUNT = 1e18;
     bytes32 constant EMPTY_BYTES32 = bytes32(0);

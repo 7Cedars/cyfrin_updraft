@@ -21,11 +21,7 @@ import {INonceHolder} from "lib/foundry-era-contracts/src/system-contracts/contr
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol"; 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
-
-
 // NB: need to add --system-mode=true at compile. 
-
-
 
 contract MyZkMinimalAccount is IAccount, Ownable {
   using MemoryTransactionHelper for Transaction;  
@@ -33,7 +29,7 @@ contract MyZkMinimalAccount is IAccount, Ownable {
   error MyZkMinimalAccount_NotEnoughBalance(); 
   error MyZkMinimalAccount_NotFromBootloader(); 
   error MyZkMinimalAccount_NotFromBootloaderOrOwner(); 
-  error MyZkMinimalAccount_ValidationFailed();
+  error MyZkMinimalAccount_ValidationFailed(); // = Invalid signature.  
   error MyZkMinimalAccount_ExecutionFailed();
   error  MyZkMinimalAccount_FailedToPay(); 
 
