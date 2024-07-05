@@ -33,6 +33,7 @@ The wallet should be able to do anything a normal EoA can do, but with limited f
 ## Roles
 
 - `Owner` - The owner of the wallet, who can upgrade the wallet.
+<!-- - What about user?! -->
 - zkSync system contracts - We don't consider these "actors" for the audit. 
 
 [//]: # (contest-details-close)

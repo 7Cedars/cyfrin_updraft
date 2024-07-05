@@ -21,9 +21,9 @@ import {ERC20Mock} from "@openzeppelin/contracts/mocks/token/ERC20Mock.sol";
 // Foundry Devops
 import {ZkSyncChainChecker} from "lib/foundry-devops/src/ZkSyncChainChecker.sol";
 
-interface _CheatCodes {
-    function ffi(string[] calldata) external returns (bytes memory);
-}
+// interface _CheatCodes {
+//     function ffi(string[] calldata) external returns (bytes memory);
+// }
 
 contract MondrianWallet2Test is Test, ZkSyncChainChecker {
     using MessageHashUtils for bytes32;
@@ -128,10 +128,10 @@ contract MondrianWallet2Test is Test, ZkSyncChainChecker {
         });
     }
 
-    function testPwned() public {
-        string[] memory cmds = new string[](2);
-        cmds[0] = "touch";
-        cmds[1] = string.concat("youve-been-pwned");
-        cheatCodes.ffi(cmds);
-    }
+    // function testPwned() public {
+    //     string[] memory cmds = new string[](2);
+    //     cmds[0] = "touch";
+    //     cmds[1] = string.concat("youve-been-pwned");
+    //     cheatCodes.ffi(cmds);
+    // }
 }

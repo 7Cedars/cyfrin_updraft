@@ -4,15 +4,17 @@
 
 # INFO: Standard Work flow audit
 [ ] Scoping
-  [ ] Read the docs: get a sense of what the protocol does.
-    [ ] Are roles defined? 
-    [ ] Any diagrams? Draw my own? 
-    [ ] What are invariants that need to hold? Have they been written out? 
-  [ ] Read the docs: scope
-    [ ] is there a commit hash to focus on? 
-    [ ] see what is in and out of scope. 
-    [ ] Are there known bugs / issues that are out of scope?  
-  [ ] Test suite: 
+  [x] Read the docs: get a sense of what the protocol does.
+    [x] Are roles defined? 
+    [x] Any diagrams? Draw my own? - none. But also does not make a whole lot of sense. Or does it? 
+    [x] What are invariants that need to hold? Have they been written out? = see notes
+  [x] Read the docs: scope
+    [x] is there a commit hash to focus on? = no 
+    [x] see what is in and out of scope. = in scope: MondrianWallet2.sol
+    [x] Are there known bugs / issues that are out of scope? = see readme: only two system contracts it is supposed to work with. 
+      - The wallet may not work as intended with zksync system contracts. The only system contract that it is expected to work correctly with is the `DEPLOYER_CONTRACT` and the `NONCE_HOLDER_SYSTEM_CONTRACT`.
+      - We are using the `cyfrin/foundry-era-contracts` package, which is not what the zkSync documentation recommends. Please ignore. 
+  [ ] Test suite: NB: zksync tests! -- see module I just completed... 
     [ ] what is the test coverage? 
     [ ] unit, fuzz, invariant tests? 
   [ ] Run `solidity: metrics` on the SRC folder
