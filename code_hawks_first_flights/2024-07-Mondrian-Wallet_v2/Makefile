@@ -16,3 +16,6 @@ build:; foundryup-zksync && forge build --zksync
 
 test :; forge test --zksync --system-mode=true
 
+ZKSYNC_FORKED_TEST_ARGS := --fork-url $(ZKSYNC_RPC_URL) 
+
+forkedTest :; forge test --zksync --system-mode=true $(ZKSYNC_FORKED_TEST_ARGS) 

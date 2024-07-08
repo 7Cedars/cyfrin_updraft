@@ -64,14 +64,21 @@ contract MondrianWallet2 is IAccount, Initializable, OwnableUpgradeable, UUPSUpg
         _;
     }
 
-    // £question: How do you setup an upgradable contract in zksync. Check. But 100% not like this.  
+    // £answered: How do you setup an upgradable contract in zksync. Check. But 100% not like this -- It seems very much like you can do it in this way :/   
     function initialize() public initializer {
         __Ownable_init(msg.sender);
         __UUPSUpgradeable_init();
     }
 
+    // £answered: See also above at function initialize(). How do you setup an upgradable contract in zksync? Check.  
+    // £audit-low? Constructor unnecessary. 
+    // from: https://docs.zksync.io/build/developer-reference/era-contracts/system-contracts
+    /**
+     * On ZKsync, there is no separation between deployed code and constructor code. The constructor is always a part of the deployment code of the contract. 
+     * In order to protect it from being called, the compiler-generated contracts invoke constructor only if the isConstructor flag provided (it is only available for the system contracts).
+     */
     /// @custom:oz-upgrades-unsafe-allow constructor
-    // £question: See also above at function initialize(). How do you setup an upgradable contract in zksync? Check.  
+    // in zk-sync example this bit is left out. It is not needed. Is it a risk that it is included?? // It is at least inefficient & unneccessary... 
     constructor() {
         _disableInitializers();
     }
@@ -115,7 +122,13 @@ contract MondrianWallet2 is IAccount, Initializable, OwnableUpgradeable, UUPSUpg
     }
 
     // this seems ok... 
-    // £question: check .payToTheBootloader? => seems ok. Same version as cyfrin updraft. (also: not in scope..)
+    // £answered: check .payToTheBootloader? => seems ok. Same version as cyfrin updraft. (also: not in scope..)
+    // £answered, more or less. Does this function need access control?  It might need to, have to try:  
+    // Interesting in example from ZKS~ync themselves (see https://github.com/code-423n4/2023-03-zksync//blob/main/contracts/DefaultAccount.sol) 
+    // they DO have access control. This function can ONLY be called by bootloader (or mroe precisely, it returns empty data if not called by bootloader). 
+    // £audit-low? What happens if another account pays? Can this block transactions?  
+    // NB: Note that of these functions need to be paid directly, it breaks intended purpose of account abstraction.
+    // NB2: This function is supposed to be called by bootloader, implying that funds need to be present in contract.  
     function payForTransaction(bytes32, /*_txHash*/ bytes32, /*_suggestedSignedHash*/ Transaction memory _transaction)
         external
         payable
@@ -129,15 +142,14 @@ contract MondrianWallet2 is IAccount, Initializable, OwnableUpgradeable, UUPSUpg
     /**
      * @dev We never call this function, since we are not using a paymaster
      */
-     // seems ok. 
+     // seems ok - 
+     // £answered: Can I get funds into contract via this function? NOPE. 
     function prepareForPaymaster(
         bytes32, /*_txHash*/
         bytes32, /*_possibleSignedHash*/
         Transaction memory /*_transaction*/
     ) external payable {}
 
-    // CONTINUE HERE // 
-    // THERE ARE INDEED A NUMBER OF ISSUES IN THESE INTERNAL FUNCTIONS // 
 
     /*//////////////////////////////////////////////////////////////
                            INTERNAL FUNCTIONS
@@ -145,6 +157,9 @@ contract MondrianWallet2 is IAccount, Initializable, OwnableUpgradeable, UUPSUpg
 
     // Apart from question below, this function seems to be fine.   
     function _validateTransaction(Transaction memory _transaction) internal returns (bytes4 magic) {
+        // £note: increases nonce. Seems correct. 
+        // £answered: what happens with the nonce when the contract is upgraded? - Nonce just keeps on going coreectly 
+        // Does it screw up uniqueness of nonces? (if they are reset on umpgrading impemantation, but proxy address remains the same?)
         SystemContractsCaller.systemCallWithPropagatedRevert(
             uint32(gasleft()),
             address(NONCE_HOLDER_SYSTEM_CONTRACT),
@@ -155,14 +170,15 @@ contract MondrianWallet2 is IAccount, Initializable, OwnableUpgradeable, UUPSUpg
         // Check for fee to pay
         uint256 totalRequiredBalance = _transaction.totalRequiredBalance();
         if (totalRequiredBalance > address(this).balance) { // NB! the address needs to have balance! Without a receive function this will not be possible. Right? A payable function will just return money that is not necessary? 
-        // £question: check if we can get funds into the contract as needed to execute functions. If not possible, this contract will not work. 
+        // £answered: check if we can get funds into the contract as needed to execute functions. If not possible, this contract will not work. = NOPE.  
             revert MondrianWallet2__NotEnoughBalance();
         }
 
         // Check the signature
+        // £audit? Only the _owner_  can make transactions. Ok? I checked. And it is ok. 
         bytes32 txHash = _transaction.encodeHash();
         address signer = ECDSA.recover(txHash, _transaction.signature);
-        bool isValidSigner = signer == owner();
+        bool isValidSigner = signer == owner(); // signature NEEDS to be owner! -- not any other user. Is this in line with intended functionality? 
         if (isValidSigner) {
             magic = ACCOUNT_VALIDATION_SUCCESS_MAGIC;
         } else {
@@ -180,8 +196,12 @@ contract MondrianWallet2 is IAccount, Initializable, OwnableUpgradeable, UUPSUpg
             uint32 gas = Utils.safeCastToU32(gasleft());
             SystemContractsCaller.systemCallWithPropagatedRevert(gas, to, value, data);
         } else {
-            // £audit: this needs to be assembly. data field will not work. See cyfrin updraft course. 
+            // £audit: this needs to be assembly. data field will not work. See cyfrin updraft course.
+            // check docs from zkSync. .call does not work.  
             bool success;
+            // assembly {
+            //     success := call(gas(), to, value, add(data, 0x20), mload(data), 0, 0)
+            // }
             (success,) = to.call{value: value}(data);
             if (!success) {
                 revert MondrianWallet2__ExecutionFailed();
@@ -191,6 +211,7 @@ contract MondrianWallet2 is IAccount, Initializable, OwnableUpgradeable, UUPSUpg
 
     // £audit: this won't work.. right? Needed for UUPS
     // this is not used anywhere. Probably for inhereted function. 
-    // £question: as this function is called __authorizeUpgrade_ and it is left blank... does this mean ANYONE can upgrade?!   
+    // £answered: as this function is called __authorizeUpgrade_ and it is left blank... does this mean ANYONE can upgrade?! YES. 
+    // See UUPSUpgradable.sol. INDEED NEEDS ACCESS CONTROL. 
     function _authorizeUpgrade(address newImplementation) internal override {}
 }

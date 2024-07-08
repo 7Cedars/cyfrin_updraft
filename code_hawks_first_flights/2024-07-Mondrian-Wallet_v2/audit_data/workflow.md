@@ -3,6 +3,7 @@
 - continue at: -- Read the docs -- 
 
 # INFO: Standard Work flow audit
+
 [ ] Scoping
   [ ] Create an `audit` branch to work in.
     [ ] Copy files from previous audit 
@@ -15,8 +16,8 @@
     [x] is there a commit hash to focus on? = no 
     [x] see what is in and out of scope. = in scope: MondrianWallet2.sol
     [x] Are there known bugs / issues that are out of scope? = see readme: only two system contracts it is supposed to work with. 
-      - The wallet may not work as intended with zksync system contracts. The only system contract that it is expected to work correctly with is the `DEPLOYER_CONTRACT` and the `NONCE_HOLDER_SYSTEM_CONTRACT`.
-      - We are using the `cyfrin/foundry-era-contracts` package, which is not what the zkSync documentation recommends. Please ignore. 
+      [ ] The wallet may not work as intended with zksync system contracts. The only system contract that it is expected to work correctly with is the `DEPLOYER_CONTRACT` and the `NONCE_HOLDER_SYSTEM_CONTRACT`.
+      [ ] We are using the `cyfrin/foundry-era-contracts` package, which is not what the zkSync documentation recommends. Please ignore. 
   [x] Test suite: NB: zksync tests! -- see module I just completed... 
     [x] what is the test coverage? -- unknown. (coverage does not work). But does not seem too good :D 
     [x] unit, fuzz, invariant tests? - only unit. 
@@ -24,14 +25,14 @@
     [x] Make a check list by complexity. (pincho method) = only one contract :D  
     [x] Check overview of how methods are called. 
     [x] Create sequence of how to review contracts. Where to start, how to continue. Probably simple to complex contracts. 
-[ ] Reconnaissance
+[x] Reconnaissance
   [x] Run `slither .` on the code base. Make notes in the code of where issues were flagged.
   [x] Run `aderyn .` on the code base. Make notes in the code of where issues were flagged.
-  [ ] Go through code in sequence decided earlier. 
-  [ ] Make notes, ask questions... get to know the code. 
+  [x] Go through code in sequence decided earlier. 
+  [wip]  Make notes, ask questions... get to know the code. 
 
 [ ] Vulnerability identification: 
-  [ ] First pass: Get the attacker mentality started: how to break what I see? 
+  [x] First pass: Get the attacker mentality started: how to break what I see? 
     [ ] go through questions I created at scoping phase as I do so.  
   [ ] When I think I found one: build PoC and check.
     [ ] If indeed vulnerability, create report item: only title and ref to PoC. (I might find related issues, might get more insight etc.) 
