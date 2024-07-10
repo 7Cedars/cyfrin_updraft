@@ -38,10 +38,12 @@ An additional note on testing. This issue did not emerge in testing because the 
 Although common practice, it makes issues within funding contracts easy to miss.  
 
 **Proof of Concept:**
+
 1. User deploys an account abstraction and transfers ownership to themselves. 
 2. User attempts to transfer funds to the contract and fails. 
 3. Bootloader attempts to validate transaction, fails. 
 4. User attempts to execute transaction directly through `MondrianWallet2::executeTransaction` and succeeds. 
+
 In short, the only way transactions can be executed are directly by the owner of the contract, defeating the purpose of Account Abstraction.   
 
 <details>
@@ -50,6 +52,12 @@ In short, the only way transactions can be executed are directly by the owner of
 First remove cheat code that adds funds to `mondrianWallet` account in `ModrianWallet2Test.t.sol::setup` [sic: note the missing n!]. 
 ```diff 
 - vm.deal(address(mondrianWallet), AMOUNT);
+```
+
+And set the proxy to payable: 
+```diff
+- mondrianWallet = MondrianWallet2(address(proxy));
++ mondrianWallet = MondrianWallet2(payable(address(proxy)));
 ```
 
 Then add the following to `ModrianWallet2Test.t.sol`. 
@@ -112,7 +120,7 @@ Add a payable fallback function to the contract.
 
 ### Missing access control on `MondrianWallet2::_authorizeUpgrade` make it possible for anyone to call `MondrianWallet2::upgradeToAndCall` and permanently change its functionality.   
 
-**Description:** `MondrianWallet2` inherits `UUPSUpgradeable` from openZeppelin. This contract comes with a function `upgradeToAndCall` that upgrades a contract and the requirement to create a `_authorizeUpgrade` function to manage access control. As is noed in the `UUPSUpgradable` contract: 
+**Description:** `MondrianWallet2` inherits `UUPSUpgradeable` from openZeppelin. This contract comes with a function `upgradeToAndCall` that upgrades a contract. It also comes with a requirement to include a `_authorizeUpgrade` function that manages access control. As noted in the `UUPSUpgradable` contract: 
 >
 > The {_authorizeUpgrade} function must be overridden to include access restriction to the upgrade mechanism.
 >
@@ -122,12 +130,12 @@ However, the implementation of `_authorizeUpgrade` lacks any such access restric
   function _authorizeUpgrade(address newImplementation) internal override {}
 ```
 
-**Impact:** Because anyone can call `MondrianWallet2::upgradeToAndCall`, anyone can upgrade the contract to anything they want. First, this goes against the state intention of the contract as described in `README.md`: 
+**Impact:** Because anyone can call `MondrianWallet2::upgradeToAndCall`, anyone can upgrade the contract to anything they want. First, this goes against the stated intention of the contract. From `README.md`: 
 >
 > only the owner of the wallet can introduce functionality later
 >
 Second, it allows for a malicious user to disable the contract. 
-Third, the the upgradeability can also be disabled (by having `_authorizeUpgrade` always revert), making it impossible to revert any maliciously introduced changes.    
+Third, the the upgradeability can also be disabled (by having `_authorizeUpgrade` always revert), making it impossible to revert changes.    
 
 **Proof of Concept:**
 1. A malicious user deploys an alternative `MondrianWallet2` implementation.   
@@ -317,13 +325,13 @@ function executeTransactionFromOutside(Transaction memory _transaction) external
 
 In short, for ZKSync to work properly, each transaction that is executed needs to have a unique (sender, nonce) pair. The `MondrianWallet::validateTransaction` function ensures this invariance holds, by increasing the nonce with each validated transaction. 
 
-Usually, the bootloader of ZKSync will always call validate before executing a transaction and check if a transaction has already been executed. However, because in `MondrianWallet2` the owner of the contract can also execute a transaction, they  can choose to execute a transaction multiple times - irrespective if this transaction has already been executed. 
+Usually, ZKSync's bootloader of calls validate before executing a transaction and checks if a transaction has already been executed. However, because in `MondrianWallet2` the owner of the contract can also execute a transaction, they  can choose to execute a transaction multiple times - irrespective if this transaction has already been executed. 
 
 ```javascript
   function executeTransaction(bytes32, /*_txHash*/ bytes32, /*_suggestedSignedHash*/ Transaction memory _transaction)
 ```
 
-**Impact:** As the owner of `MondrianWallet2` can execute a transaction multiple times, it breaks of a fundamental invariant of ZKSync: the uniqueness of (sender, nonce) pairs. It can potentially have serious consequences for the functioning of the contract.
+**Impact:** As the owner of `MondrianWallet2` can execute a transaction multiple times, it breaks a fundamental invariant of ZKSync: the uniqueness of (sender, nonce) pairs. It can potentially have serious consequences for the functioning of the contract.
 
 **Proof of Concept:** 
 1. A user creates a transaction to mint usdc coins.
@@ -389,7 +397,153 @@ This also allows for the deletion of the `requireFromBootLoaderOrOwner` modifier
 
 
 ## Medium
+### When the owner calls the function `MondrianWallet2::renounceOwnership` any funds left in the contract are stuck forever. 
 
+**Description:** `MondrianWallet2` inherits the function `renounceOwnership` from openZeppelin's `OwnableUpgradeable`. This function simply transfers ownership to `address(0)`. 
+
+See `OwnableUpgradeable.sol`:
+```javascript
+    function renounceOwnership() public virtual onlyOwner {
+        _transferOwnership(address(0));
+    }
+```
+
+As is noted in `OwnableUpgradeable.sol`: 
+>
+> NOTE: Renouncing ownership will leave the contract without an owner,
+> thereby disabling any functionality that is only available to the owner.
+>
+
+Making any kind of transaction depends on a signature of the owner. As such, no transactions are possible after the owner renounces their ownership. This includes transfer of funds out of the contract.  
+
+**Impact:** In the life cycle of an Abstracted Account, renouncing ownership is a likely final action. It is very easy to forget to transfer any remaining funds out of the contract before doing so, especially when doing so in an emergency. As such, it is quite likely that funds are left in the contract by accident. 
+
+**Proof of Concept:**
+1. A user deploys `MondrianWallet2` and transfers ownership to their address. 
+2. The user transfers funds into the `MondrianWallet2` account. 
+3. The user renounces ownership and forgets to retrieve funds. 
+4. User's funds are now stuck in the account forever.
+<details>
+<summary> Proof of Concept</summary>
+
+Place the following in `ModrianWallet2Test.t.sol`. 
+```javascript
+    // Please note that you will also need --system-mode=true to run this test. 
+   function testRenouncingOwnershipLeavesEthStuckInContract() public onlyZkSync {
+        vm.deal(address(mondrianWallet), AMOUNT); 
+        address dest = address(usdc);
+        uint256 value = 0;
+        bytes memory functionData = abi.encodeWithSelector(ERC20Mock.mint.selector, address(mondrianWallet), AMOUNT);
+        Transaction memory transaction = _createUnsignedTransaction(mondrianWallet.owner(), 113, dest, value, functionData);
+        transaction = _signTransaction(transaction);
+
+        vm.prank(mondrianWallet.owner()); 
+        mondrianWallet.renounceOwnership();
+
+        vm.prank(ANVIL_DEFAULT_ACCOUNT);
+        vm.expectRevert(MondrianWallet2.MondrianWallet2__NotFromBootLoaderOrOwner.selector);
+        mondrianWallet.executeTransaction(EMPTY_BYTES32, EMPTY_BYTES32, transaction);
+        
+        vm.prank(BOOTLOADER_FORMAL_ADDRESS);  
+        bytes4 magic = mondrianWallet.validateTransaction(EMPTY_BYTES32, EMPTY_BYTES32, transaction);
+        vm.assertEq(magic, bytes4(0));
+    }
+```
+</details>
+
+**Recommended Mitigation:** One approach is to override `OwnableUpgradeable::renounceOwnership` function, adding a transfer of funds to the contract owner when `renounceOwnership` is called. 
+
+Note that it is probably best _not_ to make renouncing ownership conditional on funds having been successfully transferred. In some cases it might be more important to immediately renounce ownership (for instance when keys of an account have been compromised) rather than retrieving all funds from the contract.  
+
+Add the following code to `MondrianWallet2.sol`:  
+```diff 
++   function renounceOwnership() public override onlyOwner {
++      uint256 remainingFunds = address(this).balance;
++      owner().call{value: remainingFunds}("");
++      _transferOwnership(address(0));
++    }
+```
+
+### `MondrianWallet2::payForTransaction` lacks access control, allowing a malicious actor to block a transaction by draining the contract prior to validation. 
+
+**Description:** According to [the ZKsync documentation](https://staging-docs.zksync.io/build/developer-reference/account-abstraction/design#:~:text=in%20a%20block.-,Steps%20in%20the%20Validation,for%20the%20next%20step.,-Execution), the `payForTransaction` function is meant to be called only by the Bootloader to collect fees necessary to execute transactions. 
+
+However, because an access control is missing in `MondrianWallet2::payForTransaction` anyone can call the function. There is also no check on how often the function is called. 
+
+This allows a malicious actor to observe the transaction in the mempool and use its data to repeatedly call payForTransaction. It results in moving funds from `MondrianWallet2` to the ZKSync Bootloader. 
+
+```javascript
+@>  function payForTransaction(bytes32, /*_txHash*/ bytes32, /*_suggestedSignedHash*/ Transaction memory _transaction)
+        external
+        payable
+    {  
+```
+
+**Impact:** When funds are moved from the `MondrianWallet2` to the ZKSync Bootloader, `MondrianWallet2::validateTransaction` will fail due to lack of funds. Also, when the bootloader itself eventually calls `payForTransaction` to retrieve funds, this function will fail. 
+
+In effect, the lack of access controls on `MondrianWallet2::payForTransaction` allows for any transaction to be blocked by a malicious user. 
+
+Please note that [there is a refund of unused fees on ZKsync](https://staging-docs.zksync.io/build/developer-reference/fee-model). As such, it is likely that `MondrianWallet2` will eventually receive a refund of its fees. However, it is likely a refund will only happen after the transaction has been declined.
+
+**Proof of Concept:**
+Due to limits in the toolchain used (foundry) to test the ZKSync blockchain, it was not possible to obtain a fine grained understanding of how the bootloader goes through the life cycle of a 113 type transaction. It made it impossible to create a true Proof of Concept of this vulnerability. What follows is as close as possible approximation using foundry's standard test suite.  
+
+The sequence: 
+1. Normal user A creates a transaction. 
+2. Malicious user B observes the transaction. 
+3. Malicious user B calls `MondrianWallet2::payForTransaction` until `mondrianWallet2.balance < transaction.maxFeePerGas * transaction.gasLimit`. 
+4. The bootloader calls `MondrianWallet::validateTransaction`. 
+5. `MondrianWallet::validateTransaction` fails because of lack of funds. 
+<details>
+<summary> Proof of Concept</summary>
+
+Place the following in `ModrianWallet2Test.t.sol`. 
+```javascript
+    // You'll also need --system-mode=true to run this test
+    function testBlockTransactionByPayingForTransaction() public onlyZkSync {
+        // Prepare
+        uint256 FUNDS_MONDRIAN_WALLET = 1e16; 
+        vm.deal(address(mondrianWallet), FUNDS_MONDRIAN_WALLET); 
+        address THIRD_PARTY_ACCOUNT = makeAddr("3rdParty");
+        
+        // create transaction  
+        address dest = address(usdc);
+        uint256 value = 0;
+        bytes memory functionData = abi.encodeWithSelector(ERC20Mock.mint.selector, address(mondrianWallet), AMOUNT);
+        Transaction memory transaction = _createUnsignedTransaction(mondrianWallet.owner(), 113, dest, value, functionData);
+        transaction = _signTransaction(transaction);
+
+        // using information embedded in the Transaction struct, we can calculate how much fee will be paid for the transaction
+        // and, crucially, how many runs we need to move sufficient funds from the Mondrian Wallet to the Bootloader until mondrianWallet2.balance < transaction.maxFeePerGas * transaction.gasLimit.  
+        uint256 feeAmountPerTransaction = transaction.maxFeePerGas * transaction.gasLimit;
+        uint256 runsNeeded = FUNDS_MONDRIAN_WALLET / feeAmountPerTransaction; 
+        console2.log("runsNeeded to drain Mondrian Wallet:", runsNeeded); 
+
+        // Act 
+        // by calling payForTransaction a sufficient amount of times, the contract is drained.  
+        vm.startPrank(THIRD_PARTY_ACCOUNT); 
+        for (uint256 i; i < runsNeeded; i++) {
+            mondrianWallet.payForTransaction(EMPTY_BYTES32, EMPTY_BYTES32, transaction);
+        }
+        vm.stopPrank();         
+        
+        // Act & Assert 
+        // When the bootloader calls validateTransaction, it fails: Not Enough Balance.   
+        vm.prank(BOOTLOADER_FORMAL_ADDRESS);
+        vm.expectRevert(MondrianWallet2.MondrianWallet2__NotEnoughBalance.selector); 
+        bytes4 magic = mondrianWallet.validateTransaction(EMPTY_BYTES32, EMPTY_BYTES32, transaction);
+    }
+```
+</details>
+
+**Recommended Mitigation:** Add an access control to the `MondrianWallet2::payForTransaction` function, allowing only the bootloader to call the function. 
+
+```diff 
+function payForTransaction(bytes32, /*_txHash*/ bytes32, /*_suggestedSignedHash*/ Transaction memory _transaction)
+        external
+        payable
++       requireFromBootLoader  
+```
 
 ### Missing checks on delegate calls allow for all public functions in `MondrianWallet2` to be called via a delegate call. This is not possible in traditional EoAs. It breaks the intended functionality of `MondrianWallet2` as described in its `README.md`. 
 
@@ -397,7 +551,7 @@ This also allows for the deletion of the `requireFromBootLoaderOrOwner` modifier
 >
 > The wallet should be able to do anything a normal EoA can do, ... 
 >  
-A normal EoA cannot have functions that are called via a delegate call. Because it is not a smart contract. However, all public functions in `MondrianWallet2` lack checks that disallow them to be called via a delegate call. 
+Because it is not a smart contract, a normal EoA cannot have functions that are called via a delegate call. However, all public functions in `MondrianWallet2` lack checks that disallow them to be called via a delegate call. 
 
 See the missing checks in the following functions: 
 ```javascript
@@ -419,7 +573,7 @@ See the missing checks in the following functions:
   function prepareForPaymaster( bytes32, /*_txHash*/ bytes32, /*_possibleSignedHash*/ Transaction memory /*_transaction*/ ) external payable 
 ```
 
-**Impact:** The lack of checks disallowing functions to be called via a delegate call, breaks the intended functionality of `MondrianWallet2`. 
+**Impact:** The lack of checks disallowing functions to be called via a delegate call, breaking the intended functionality of `MondrianWallet2`. 
 
 **Recommended Mitigation:** Create a modifier to check for delegate calls and apply this modifier to all public functions. 
 
@@ -464,157 +618,6 @@ The mitigation below follows the example from `DefaulAccount.sol`, written by Ma
 
 ```
 
-
-### When the owner calls the function `MondrianWallet2::renounceOwnership` any funds left in the contract are stuck forever. 
-
-**Description:** `MondrianWallet2` inherits the function `renounceOwnership` from openZeppelin's `OwnableUpgradeable`. This function simply transfers ownership to `address(0)`. 
-
-```javascript
-    function renounceOwnership() public virtual onlyOwner {
-        _transferOwnership(address(0));
-    }
-```
-
-As is noted in `OwnableUpgradeable.sol`: 
->
-> NOTE: Renouncing ownership will leave the contract without an owner,
-> thereby disabling any functionality that is only available to the owner.
->
-
-Making any kind of transaction depends on a signature of the owner. As such, no transactions are possible after the owner renounces their ownership. This includes transfer of funds out of the contract.  
-
-**Impact:** In the life cycle of an Abstracted Account, renouncing ownership is a likely final action. It is very easy to forget to transfer any remaining funds out of the contract before doing so, especially when doing so in an emergency. As such, it is quite likely that funds are left in the contract by accident. 
-
-**Proof of Concept:**
-1. A user deploys `MondrianWallet2` and transfers ownership to their address. 
-2. The user transfers funds into the `MondrianWallet2` account. 
-3. The user renounces ownership and forgets to retrieve funds. 
-4. User's funds are now stuck in the account forever.
-<details>
-<summary> Proof of Concept</summary>
-
-Place the following in `ModrianWallet2Test.t.sol`. 
-```javascript
-    // Please note that you will also need --system-mode=true to run this test. 
-   function testRenouncingOwnershipLeavesEthStuckInContract() public onlyZkSync {
-        // Prepare
-        // setting up accounts
-        vm.deal(address(mondrianWallet), AMOUNT); 
-        // create transaction  
-        address dest = address(usdc);
-        uint256 value = 0;
-        bytes memory functionData = abi.encodeWithSelector(ERC20Mock.mint.selector, address(mondrianWallet), AMOUNT);
-        Transaction memory transaction = _createUnsignedTransaction(mondrianWallet.owner(), 113, dest, value, functionData);
-        transaction = _signTransaction(transaction);
-
-        // Act
-        vm.prank(mondrianWallet.owner()); 
-        mondrianWallet.renounceOwnership();
-
-        // Assert
-        // transaction execution fails
-        vm.prank(ANVIL_DEFAULT_ACCOUNT);
-        vm.expectRevert(MondrianWallet2.MondrianWallet2__NotFromBootLoaderOrOwner.selector);
-        mondrianWallet.executeTransaction(EMPTY_BYTES32, EMPTY_BYTES32, transaction);
-        
-        // also transaction validation fails 
-        vm.prank(BOOTLOADER_FORMAL_ADDRESS);  
-        bytes4 magic = mondrianWallet.validateTransaction(EMPTY_BYTES32, EMPTY_BYTES32, transaction);
-        vm.assertEq(magic, bytes4(0));
-    }
-```
-</details>
-
-**Recommended Mitigation:** One approach is to override `OwnableUpgradeable::renounceOwnership` function, adding a transfer of funds to the contract owner when `renounceOwnership` is called. 
-
-Note that it is probably best _not_ to make renouncing ownership conditional on funds having been successfully transferred. In some cases it might be more important to immediately renounce ownership (for instance when keys of an account have been compromised) rather than retrieving all funds from the contract.  
-
-Add the following code to `MondrianWallet2.sol`:  
-```diff 
-+   function renounceOwnership() public override onlyOwner {
-+      uint256 remainingFunds = address(this).balance;
-+      owner().call{value: remainingFunds}("");
-+      _transferOwnership(address(0));
-+    }
-```
-### `MondrianWallet2::payForTransaction` lacks access control, allowing a malicious actor to block a transaction by draining the contract prior to validation. 
-
-**Description:** According to [the ZKsync documentation](https://staging-docs.zksync.io/build/developer-reference/account-abstraction/design#:~:text=in%20a%20block.-,Steps%20in%20the%20Validation,for%20the%20next%20step.,-Execution), the `payForTransaction` function is meant to be called by the Bootloader only to collect fees necessary to execute transactions. 
-
-However, because an access control is missing in `MondrianWallet2::payForTransaction` anyone can call the function. There is also no check on how often the function is called. 
-
-This allows a malicious actor to observe the transaction in the mempool, and use its data repeatedly to call payForTransaction. It results in moving funds from `MondrianWallet2` to the ZKSync Bootloader. 
-
-```javascript
-@>  function payForTransaction(bytes32, /*_txHash*/ bytes32, /*_suggestedSignedHash*/ Transaction memory _transaction)
-        external
-        payable
-    {  
-```
-
-**Impact:** When funds are moved from the `MondrianWallet2` to the ZKSync Bootloader, `MondrianWallet2::validateTransaction` will fail due to lack of funds. Also, when the bootloader itself will eventually call `payForTransaction` to retrieve funds, this function will also fail. 
-
-In effect, the lack of access controls on `MondrianWallet2::payForTransaction` allows for any transaction to be blocked by a malicious user. 
-
-Note that there is a refund of unused fees on ZKsync. As such, `MondrianWallet2` will receive a refund of its fees. However, this will not unblock the transaction. 
-
-**Proof of Concept:**
-1. Normal user A creates a transaction. 
-2. Malicious user B observes the transaction. 
-3. Malicious user B calls `MondrianWallet2::payForTransaction` until `mondrianWallet2.balance < transaction.maxFeePerGas * transaction.gasLimit`. 
-4. The bootloader calls `MondrianWallet::validateTransaction`. 
-5. `MondrianWallet::validateTransaction` fails because of lack of funds. 
-<details>
-<summary> Proof of Concept</summary>
-
-Place the following in `ModrianWallet2Test.t.sol`. 
-```javascript
-    // You'll also need --system-mode=true to run this test
-    function testBlockTransactionByPayingForTransaction() public onlyZkSync {
-        // Prepare
-        uint256 FUNDS_MONDRIAN_WALLET = 1e16; 
-        vm.deal(address(mondrianWallet), FUNDS_MONDRIAN_WALLET); 
-        address THIRD_PARTY_ACCOUNT = makeAddr("3rdParty");
-        
-        // create transaction  
-        address dest = address(usdc);
-        uint256 value = 0;
-        bytes memory functionData = abi.encodeWithSelector(ERC20Mock.mint.selector, address(mondrianWallet), AMOUNT);
-        Transaction memory transaction = _createUnsignedTransaction(mondrianWallet.owner(), 113, dest, value, functionData);
-        transaction = _signTransaction(transaction);
-
-        // using information embedded in the Transaction struct, we can calculate how much fee will be paid for the transaction
-        // and, crucially, how many runs we need to move all funds from the Mondrian Wallet to the Bootloader.  
-        uint256 feeAmountPerTransaction = transaction.maxFeePerGas * transaction.gasLimit;
-        uint256 runsNeeded = FUNDS_MONDRIAN_WALLET / feeAmountPerTransaction; 
-        console2.log("runsNeeded to drain Mondrian Wallet:", runsNeeded); 
-
-        // Act 
-        // by calling payForTransaction a sufficient amount of times, the contract is drained.  
-        vm.startPrank(THIRD_PARTY_ACCOUNT); 
-        for (uint256 i; i < runsNeeded; i++) {
-            mondrianWallet.payForTransaction(EMPTY_BYTES32, EMPTY_BYTES32, transaction);
-        }
-        vm.stopPrank();         
-        
-        // Act & Assert 
-        // When the bootloader calls validateTransaction, it fails: Not Enough Balance.   
-        vm.prank(BOOTLOADER_FORMAL_ADDRESS);
-        vm.expectRevert(MondrianWallet2.MondrianWallet2__NotEnoughBalance.selector); 
-        bytes4 magic = mondrianWallet.validateTransaction(EMPTY_BYTES32, EMPTY_BYTES32, transaction);
-    }
-```
-</details>
-
-**Recommended Mitigation:** Add an access control to the `MondrianWallet2::payForTransaction` function. 
-
-```diff 
-function payForTransaction(bytes32, /*_txHash*/ bytes32, /*_suggestedSignedHash*/ Transaction memory _transaction)
-        external
-        payable
-+       requireFromBootLoader  
-```
-
 ### Lacking control on return data at `MondrianWallet2::_executeTransaction` results in excessive gas usage, unexpected behaviour and unnecessary evm errors.
 
 **Description:** The `_executeTransaction` function uses a standard `.call` function to execute the transaction. This function returns a `bool success` and `bytes memory data`. 
@@ -630,19 +633,26 @@ Even though the data field is not used (see the empty space after the comma in `
   (success,) = to.call{value: value}(data);
 ```
 
-**Impact:** Some calls that ought to return a failed (due to excessive build up of memory) will pass the initial `success` check, and only fail afterwards through an `evm error`. 
+**Impact:** Some calls that ought to return a fail (due to excessive build up of memory) will pass the initial `success` check, and only fail afterwards through an `evm error`. Or, inversely, because `_executeTransaction` allows functions to return data and have it stored in memory, some functions fail that ought to succeed. 
 
-Or, inversely, because `_executeTransaction` allows functions to return data and have it stored in memory, some functions fail that ought to succeed. 
+The above especially applies to transactions that call a function that returns large amount of bytes. 
 
-fail due to a gas limit being reached. This is especially true for transactions that call a function that returns large amount of bytes. In these cases `_executeTransaction` is also very gas inefficient.
+Additionally, 
+-  `_executeTransaction` is _very_ gas inefficient due to this issue.
+-  As the execution fails with a `evm error` instead of a correct `MondrianWallet2__ExecutionFailed` error message, functionality of frontend apps might be impacted.  
 
 **Proof of Concept:**
-1. action 1
-2. action 2
-3. ... 
+1. A contract has been deployed that returns a large amount of data. 
+2. `MondrianWallet2` calls this contract. 
+3. The contract fails with an `evm error` instead of `MondrianWallet2__ExecutionFailed`. 
+
+After mitigating this issue (see the Recommended Mitigation section below) 
+4. No call fail with an `evm error` anymore.  
+
 <details>
 <summary> Proof of Concept</summary>
 
+Place the following code after the existing tests in `ModrianWallet2Test.t.sol`: 
 ```javascript 
   contract TargetContract {
       uint256 public arrayStorage;  
@@ -659,13 +669,45 @@ fail due to a gas limit being reached. This is especially true for transactions 
   }
 ```
 
-Place the following in `SCRIPT NAME HERE`
+Place the following code in between the existing tests in `ModrianWallet2Test.t.sol`: 
 ```javascript
-  `CODE HERE`
+      // You'll also need --system-mode=true to run this test
+    function testMemoryAndReturnData() public onlyZkSync {
+        TargetContract targetContract = new TargetContract(); 
+        vm.deal(address(mondrianWallet), 100); 
+        address dest = address(targetContract);
+        uint256 value = 0;
+        uint256 inputValue; 
+
+        // transaction 1
+        inputValue = 310_000;
+        bytes memory functionData1 = abi.encodeWithSelector(TargetContract.writeToArrayStorage.selector, inputValue, AMOUNT);
+        Transaction memory transaction1 = _createUnsignedTransaction(mondrianWallet.owner(), 113, dest, value, functionData1);
+        transaction1 = _signTransaction(transaction1);
+
+        // transaction 2 
+        inputValue = 475_000;
+        bytes memory functionData2 = abi.encodeWithSelector(TargetContract.writeToArrayStorage.selector, inputValue, AMOUNT);
+        Transaction memory transaction2 = _createUnsignedTransaction(mondrianWallet.owner(), 113, dest, value, functionData2);
+        transaction2 = _signTransaction(transaction2);
+
+        vm.startPrank(ANVIL_DEFAULT_ACCOUNT);
+        // the first transaction fails because of an EVM error. 
+        // this transaction will pass with the mitigations implemented (see above). 
+        vm.expectRevert(); 
+        mondrianWallet.executeTransaction(EMPTY_BYTES32, EMPTY_BYTES32, transaction1);
+
+        // the second transaction fails because of an ExecutionFailed error. 
+        // this transaction will also not pass with the mitigations implemented (see above). 
+        vm.expectRevert(); 
+        mondrianWallet.executeTransaction(EMPTY_BYTES32, EMPTY_BYTES32, transaction2);
+
+        vm.stopPrank(); 
+    }
 ```
 </details>
 
-**Recommended Mitigation:** By disallowing functions to write return data to memory, we can avoid this problem. This can be implemented by replacing the standard `.call` with an (assembly) call that restricts the return data to length 0.  
+**Recommended Mitigation:** By disallowing functions to write return data to memory, this problem can be avoided. In short, replace the standard `.call` with an (assembly) call that restricts the return data to length 0.  
 
 ```diff 
 -   (success,) = to.call{value: value}(data);
@@ -693,7 +735,5 @@ Place the following in `SCRIPT NAME HERE`
 -        _disableInitializers();
 -    }
 ```
-
-
 
 ## False Positives 

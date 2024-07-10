@@ -46,7 +46,7 @@ contract MondrianWallet2Test is Test, ZkSyncChainChecker {
     function setUp() public {
         implementation = new MondrianWallet2();
         proxy = new ERC1967Proxy(address(implementation), "");
-        mondrianWallet = MondrianWallet2(address(proxy));
+        mondrianWallet = MondrianWallet2(payable(address(proxy)));
         mondrianWallet.initialize();
         mondrianWallet.transferOwnership(ANVIL_DEFAULT_ACCOUNT);
         usdc = new ERC20Mock();
