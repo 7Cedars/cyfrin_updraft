@@ -22,6 +22,7 @@ import {
 } from "lib/foundry-era-contracts/src/system-contracts/contracts/Constants.sol";
 import {INonceHolder} from "lib/foundry-era-contracts/src/system-contracts/contracts/interfaces/INonceHolder.sol";
 import {Utils} from "lib/foundry-era-contracts/src/system-contracts/contracts/libraries/Utils.sol";
+import {console2} from "forge-std/Test.sol";
 
 // OZ Imports
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol"; // £question. This one is not used. Why not?! -- is also not used in example from course. Maybe not an issue?
@@ -43,6 +44,7 @@ contract MondrianWallet2 is IAccount, Initializable, OwnableUpgradeable, UUPSUpg
     error MondrianWallet2__NotFromBootLoaderOrOwner();
     error MondrianWallet2__FailedToPay();
     error MondrianWallet2__InvalidSignature(); // £checked. Indeed an issue. See below: function executeTransactionFromOutside. This one is not used because signature not being checked. 
+    error MondrianWallet2__RemainingFundsInContract();
 
     /*//////////////////////////////////////////////////////////////
                                MODIFIERS
@@ -83,6 +85,10 @@ contract MondrianWallet2 is IAccount, Initializable, OwnableUpgradeable, UUPSUpg
         _disableInitializers();
     }
 
+    fallback() external payable {
+        console2.log("FALLBACK TRIGGERED"); 
+    } 
+
     // £audit-medium/high: receive() external payable {} is MISSING. I checked. it is INDEED missing. Also Fallback is missing. 
     // -- if a transaction with eth is send, it will revert. When can / will this happen? 
     // see quick explanation here: https://ethereum.stackexchange.com/questions/125337/why-contract-must-have-a-receive-fallback-to-receive-ether-isnt-a-payable
@@ -107,11 +113,14 @@ contract MondrianWallet2 is IAccount, Initializable, OwnableUpgradeable, UUPSUpg
     }
 
     // This function seems ok. but need to check actual functionality in _executeTransaction below. 
+    // Executing a trasnaction without validating is... tricky. 
     function executeTransaction(bytes32, /*_txHash*/ bytes32, /*_suggestedSignedHash*/ Transaction memory _transaction)
         external
         payable
         requireFromBootLoaderOrOwner
     {
+        console2.log("EXECUTE TRANSACTION TRIGGERED"); 
+
         _executeTransaction(_transaction);
     }
 
@@ -126,6 +135,7 @@ contract MondrianWallet2 is IAccount, Initializable, OwnableUpgradeable, UUPSUpg
     // £answered, more or less. Does this function need access control?  It might need to, have to try:  
     // Interesting in example from ZKS~ync themselves (see https://github.com/code-423n4/2023-03-zksync//blob/main/contracts/DefaultAccount.sol) 
     // they DO have access control. This function can ONLY be called by bootloader (or mroe precisely, it returns empty data if not called by bootloader). 
+    // NB: if it is called by the bootloader, it means that it is always THE CONTRACT that pays. 
     // £audit-low? What happens if another account pays? Can this block transactions?  
     // NB: Note that of these functions need to be paid directly, it breaks intended purpose of account abstraction.
     // NB2: This function is supposed to be called by bootloader, implying that funds need to be present in contract.  
@@ -149,6 +159,12 @@ contract MondrianWallet2 is IAccount, Initializable, OwnableUpgradeable, UUPSUpg
         bytes32, /*_possibleSignedHash*/
         Transaction memory /*_transaction*/
     ) external payable {}
+
+    function renounceOwnership() public override onlyOwner {
+        uint256 remainingFunds = address(this).balance;
+        owner().call{value: remainingFunds}(""); 
+        _transferOwnership(address(0));
+    }
 
 
     /*//////////////////////////////////////////////////////////////
@@ -178,7 +194,7 @@ contract MondrianWallet2 is IAccount, Initializable, OwnableUpgradeable, UUPSUpg
         // £audit? Only the _owner_  can make transactions. Ok? I checked. And it is ok. 
         bytes32 txHash = _transaction.encodeHash();
         address signer = ECDSA.recover(txHash, _transaction.signature);
-        bool isValidSigner = signer == owner(); // signature NEEDS to be owner! -- not any other user. Is this in line with intended functionality? 
+        bool isValidSigner = signer == owner(); // signature NEEDS to be owner! -- not any other user. Is this in line with intended functionality? YES
         if (isValidSigner) {
             magic = ACCOUNT_VALIDATION_SUCCESS_MAGIC;
         } else {
@@ -197,12 +213,39 @@ contract MondrianWallet2 is IAccount, Initializable, OwnableUpgradeable, UUPSUpg
             SystemContractsCaller.systemCallWithPropagatedRevert(gas, to, value, data);
         } else {
             // £audit: this needs to be assembly. data field will not work. See cyfrin updraft course.
-            // check docs from zkSync. .call does not work.  
+            // check docs from zkSync. .call does not work. 
+            // funnily enough, it will work. 
+            // £question: why do you need assembly here? What is wrong with just using to.call{value: value}(data);? 
+            // The explanation on zkSync is... incomprehensible. See https://docs.zksync.io/build/developer-reference/ethereum-differences/evm-instructions#:~:text=CALL%2C%20STATICCALL%2C%20DELEGATECALL,calls%20the%20callee.
             bool success;
+
+            // I PUT THIS IN 
+            // uint256 gasBefore; 
+            // uint256 gasAfter;
+            // uint256 gasUsage; 
             // assembly {
-            //     success := call(gas(), to, value, add(data, 0x20), mload(data), 0, 0)
-            // }
+            //     gasBefore := gas()
+            // }  
+            // console2.log("gas before:", gasBefore);
+            // 
             (success,) = to.call{value: value}(data);
+
+            // assembly {
+            //     success := call(gas(), to,     value, add(data, 0x20), mload(data), 0,   0)
+            //     }
+
+            //     success := call(gas(), target, 0,     in,              insize,      out, outsize) 
+                // As far as I understand now... what seems to happen is that return data to this function is forced to be of length 0. 
+                // Because the execute function does not return any data. 
+                // a weakness can be that the return data is only build up AFTER the call is done, 
+            
+            // assembly {
+            //     gasAfter := gas()
+            // }  
+            // console2.log("gas after:", gasAfter);
+            // gasUsage = gasBefore - gasAfter; 
+            // console2.log("gas usage:", gasUsage);
+
             if (!success) {
                 revert MondrianWallet2__ExecutionFailed();
             }
@@ -214,4 +257,6 @@ contract MondrianWallet2 is IAccount, Initializable, OwnableUpgradeable, UUPSUpg
     // £answered: as this function is called __authorizeUpgrade_ and it is left blank... does this mean ANYONE can upgrade?! YES. 
     // See UUPSUpgradable.sol. INDEED NEEDS ACCESS CONTROL. 
     function _authorizeUpgrade(address newImplementation) internal override {}
+
+
 }

@@ -5,9 +5,9 @@
 # INFO: Standard Work flow audit
 
 [ ] Scoping
-  [ ] Create an `audit` branch to work in.
-    [ ] Copy files from previous audit 
-    [ ] Clean up files.  
+  [x] Create an `audit` branch to work in.
+    [x] Copy files from previous audit 
+    [x] Clean up files.  
   [x] Read the docs: get a sense of what the protocol does.
     [x] Are roles defined? 
     [x] Any diagrams? Draw my own? - none. But also does not make a whole lot of sense. Or does it? 
@@ -33,22 +33,22 @@
 
 [ ] Vulnerability identification: 
   [x] First pass: Get the attacker mentality started: how to break what I see? 
-    [ ] go through questions I created at scoping phase as I do so.  
+    [x] go through questions I created at scoping phase as I do so.  
   [ ] When I think I found one: build PoC and check.
-    [ ] If indeed vulnerability, create report item: only title and ref to PoC. (I might find related issues, might get more insight etc.) 
+    [x] If indeed vulnerability, create report item: only title and ref to PoC. (I might find related issues, might get more insight etc.) 
   [ ] The basic things to look out for:
-    [ ] Insufficient Access control: Lacking (or wrong) role restrictions. 
-    [ ] Governor attacks possible? / Centralization? 
-    [ ] Signature Replay? 
-    [ ] Incompatibilities between chains? (see https://www.evmdiff.com/)
-    [ ] Switched variables in functions being called. 
-    [ ] Input (0) checks missing? 
-    [ ] Can functions be front run? Can people do something with the knowledge gained from transaction in mempool? 
-    [ ] Oracle manipulation?  
-    [ ] Poorly implemented randomness? (or more basically: getting info from chain that can only safely be gotten from off-chain)
-    [ ] Reentrancy weakness. 
-    [ ] With upgradable contracts: Memory overwrites?
-  [ ] Second pass: use solodits checklist (https://solodit.xyz/checklist) to go through contract again 
+    [x] Insufficient Access control: Lacking (or wrong) role restrictions. 
+    [x] Governor attacks possible? / Centralization? 
+    [x] Signature Replay? 
+    [x] Incompatibilities between chains? (see https://www.evmdiff.com/)
+    [x] Switched variables in functions being called. 
+    [x] Input (0) checks missing? 
+    [x] Can functions be front run? Can people do something with the knowledge gained from transaction in mempool? 
+    [x] Oracle manipulation?  
+    [x] Poorly implemented randomness? (or more basically: getting info from chain that can only safely be gotten from off-chain)
+    [x] Reentrancy weakness. 
+    [x] With upgradable contracts: Memory overwrites?
+  [x] Second pass: use solodits checklist (https://solodit.xyz/checklist) to go through contract again 
 
 [ ] Reporting
   [ ] See layout in this folder. 
